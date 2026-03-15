@@ -1,0 +1,231 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --card: #141414;
+  --card-hover: #1a1a1a;
+  --border: #2a2a2a;
+  --border-light: #333;
+  --primary: #22c55e;
+  --primary-hover: #16a34a;
+  --primary-light: rgba(34, 197, 94, 0.1);
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --danger: #ef4444;
+  --muted: #888;
+  --muted-light: #666;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* WhatsApp-style green gradient */
+.gradient-primary {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+}
+
+/* Smooth card hover */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  border-color: var(--border-light);
+  background: var(--card-hover);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(20, 20, 20, 0.8);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+}
+
+/* ============================================
+   MOBILE-FIRST RESPONSIVE UTILITIES
+   Based on MOBILE_UI_UX_BLUEPRINT.md
+   ============================================ */
+
+/* Touch target - minimum 48px for mobile ergonomics */
+.touch-target {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+@media (min-width: 768px) {
+  .touch-target {
+    min-height: auto;
+    min-width: auto;
+  }
+}
+
+/* Safe areas for notches and home indicators */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.safe-left {
+  padding-left: env(safe-area-inset-left, 0);
+}
+
+.safe-right {
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+/* Responsive card - less border radius on mobile */
+@media (max-width: 767px) {
+  .card {
+    border-radius: 8px;
+  }
+}
+
+/* Mobile-optimized input fields */
+@media (max-width: 767px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="tel"],
+  input[type="number"],
+  input[type="url"],
+  input[type="search"],
+  textarea,
+  select {
+    font-size: 16px !important; /* Prevents zoom on iOS */
+    min-height: 48px;
+    padding: 12px 16px;
+  }
+}
+
+/* Responsive button sizing */
+@media (max-width: 767px) {
+  button,
+  [role="button"],
+  a.btn {
+    min-height: 48px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+/* Hide scrollbars on mobile but allow scrolling */
+@media (max-width: 767px) {
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Pull-to-refresh indicator space */
+@media (max-width: 767px) {
+  .pull-to-refresh-space {
+    margin-top: -60px;
+    padding-top: 60px;
+  }
+}
+
+/* Responsive text sizes */
+@media (max-width: 767px) {
+  h1 {
+    font-size: 1.5rem;
+  }
+  h2 {
+    font-size: 1.25rem;
+  }
+  h3 {
+    font-size: 1.125rem;
+  }
+}
+
+/* Bottom sheet style for modals on mobile */
+@media (max-width: 767px) {
+  .modal-content {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 90vh;
+    border-radius: 16px 16px 0 0;
+    animation: slideUp 0.3s ease-out;
+  }
+  
+  @keyframes slideUp {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+}
+
+/* Responsive grid helpers */
+.grid-responsive {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .grid-responsive {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid-responsive {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Landscape mode adjustments */
+@media (max-height: 500px) and (orientation: landscape) {
+  .safe-bottom {
+    padding-bottom: 0;
+  }
+  
+  /* Reduce padding in landscape to maximize content space */
+  .landscape-compact {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  :root {
+    --border: #444;
+    --muted: #aaa;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Dark mode OLED optimization */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #000;
+  }
+}

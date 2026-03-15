@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+*.db
+*.db-journal
+auth_info/
+auth_info_baileys/
+.baileys/
+.next/
+out/
+src_old/
+prisma_old/
+release/
