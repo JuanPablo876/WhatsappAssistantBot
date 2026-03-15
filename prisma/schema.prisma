@@ -216,14 +216,43 @@ model VoiceConfig {
   openaiModel   String  @default("tts-1") // tts-1 or tts-1-hd
   openaiSpeed   Float   @default(1.0) // 0.25 to 4.0
   
-  // Call settings
-  callsEnabled  Boolean @default(false)
-  callWebhookUrl String?
+  // Twilio Phone Call settings
+  callsEnabled     Boolean @default(false)
+  callWebhookUrl   String?
+  callGreeting     String? // Custom greeting for inbound calls
+  callSystemPrompt String? // Custom system prompt for call AI
+  callLanguage     String  @default("en-US") // BCP-47 language code
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  callLogs CallLog[]
+}
+
+// ═══════════════════════════════════════════════════════════
+// CALL LOGS (Twilio phone call records)
+// ═══════════════════════════════════════════════════════════
+
+model CallLog {
+  id       String @id @default(cuid())
+  tenantId String
+  
+  callSid     String  @unique // Twilio Call SID
+  direction   String  // INBOUND or OUTBOUND
+  from        String  // Caller phone number
+  to          String  // Recipient phone number
+  status      String  // initiated, ringing, answered, completed, failed, busy, no-answer
+  duration    Int?    // Call duration in seconds
+  transcript  String? // JSON conversation transcript
+  recordingUrl String?
+  recordingSid String?
+  
+  startedAt DateTime
+  endedAt   DateTime?
+  createdAt DateTime @default(now())
+  
+  voiceConfig VoiceConfig? @relation(fields: [tenantId], references: [tenantId], onDelete: Cascade)
 }
 
 // ═══════════════════════════════════════════════════════════

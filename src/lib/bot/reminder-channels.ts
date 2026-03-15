@@ -125,14 +125,38 @@ export async function sendEmailReminder(
 }
 
 /**
- * Send a voice call reminder (placeholder).
+ * Send a voice call reminder via Twilio.
  */
 export async function sendVoiceCallReminder(
   tenantId: string,
   phone: string,
   message: string
 ): Promise<boolean> {
-  // This will be implemented in Phase 5 with Twilio or similar
-  logger.warn({ tenantId, phone }, 'Voice call reminders not yet implemented');
-  return false;
+  try {
+    // Dynamic import to avoid loading Twilio if not used
+    const { makeOutboundCall, isTwilioConfigured } = await import('@/lib/voice/twilio');
+    
+    if (!isTwilioConfigured()) {
+      logger.warn({ tenantId, phone }, 'Twilio not configured for voice calls');
+      return false;
+    }
+
+    const result = await makeOutboundCall(phone, {
+      tenantId,
+      greeting: message,
+      recordCall: false,
+      timeout: 30,
+    });
+
+    logger.info({ 
+      tenantId, 
+      phone, 
+      callSid: result.callSid 
+    }, 'Voice call reminder initiated');
+    
+    return true;
+  } catch (error) {
+    logger.error({ error, tenantId, phone }, 'Failed to send voice call reminder');
+    return false;
+  }
 }

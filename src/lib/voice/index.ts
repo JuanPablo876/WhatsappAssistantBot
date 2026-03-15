@@ -196,3 +196,6 @@ export function createVoiceServiceFromConfig(voiceConfig: {
 export { getWhisper } from './whisper';
 export { getElevenLabs } from './elevenlabs';
 export { getOpenAITTS } from './openai-tts';
+
+// Twilio phone call integration
+export * from './twilio';
