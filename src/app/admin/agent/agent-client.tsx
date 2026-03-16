@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 
@@ -25,6 +25,18 @@ interface ToolCallDisplay {
   result: { success: boolean; data?: unknown; error?: string };
 }
 
+/**
+ * Strip reasoning/thinking artifacts from assistant messages.
+ * Models sometimes leak <think>...</think> blocks or reasoning prefixes.
+ */
+function cleanAssistantContent(content: string): string {
+  // Remove <think>...</think> blocks (Qwen3, DeepSeek, etc.)
+  let cleaned = content.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  // Remove /no_think tags that may leak
+  cleaned = cleaned.replace(/\/no_think/g, '');
+  return cleaned.trim();
+}
+
 export default function AdminAgentClient() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -33,9 +45,15 @@ export default function AdminAgentClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [isMounted, setIsMounted] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Avoid hydration mismatch for sidebar (window.innerWidth not available on server)
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // Load sessions on mount
   useEffect(() => {
@@ -152,6 +170,8 @@ export default function AdminAgentClient() {
       ]);
     } finally {
       setIsLoading(false);
+      // Restore focus to input after response
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
 
@@ -185,7 +205,7 @@ export default function AdminAgentClient() {
 
       {/* Sessions Sidebar */}
       <AnimatePresence>
-        {(showSidebar || typeof window !== 'undefined' && window.innerWidth >= 768) && (
+        {(showSidebar || isMounted) && (
           <motion.aside
             initial={{ x: -300, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
@@ -306,7 +326,13 @@ export default function AdminAgentClient() {
           )}
 
           {messages
-            .filter((m) => m.role !== 'tool' && m.role !== 'system')
+            .filter((m) => {
+              // Hide tool results and system messages
+              if (m.role === 'tool' || m.role === 'system') return false;
+              // Hide intermediate assistant messages (tool-calling with no content)
+              if (m.role === 'assistant' && (!m.content || !m.content.trim()) && m.tool_calls?.length) return false;
+              return true;
+            })
             .map((message, i) => (
               <div key={i} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div
@@ -336,11 +362,9 @@ export default function AdminAgentClient() {
                             },
                           }}
                         >
-                          {message.content}
+                          {cleanAssistantContent(message.content)}
                         </ReactMarkdown>
-                      ) : (
-                        <span className="text-white/40 italic text-xs">Processing...</span>
-                      )}
+                      ) : null}
                     </div>
                   ) : (
                     <p className="text-sm text-white/90 whitespace-pre-wrap">{String(message.content || '')}</p>
