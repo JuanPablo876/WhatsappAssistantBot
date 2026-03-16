@@ -59,6 +59,16 @@ export const braveWebSearch: AdminToolHandler = async (args) => {
   }
 
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+  // Debug: Log all env vars that contain 'BRAVE' or similar keys
+  const envKeys = Object.keys(process.env).filter(k => k.includes('BRAVE') || k.includes('API_KEY'));
+  logger.info({ 
+    hasApiKey: !!apiKey, 
+    keyLength: apiKey?.length,
+    braveEnvKeys: envKeys,
+    electronApp: process.env.ELECTRON_APP,
+    nodeEnv: process.env.NODE_ENV
+  }, 'Brave search called - debug env');
+  
   if (!apiKey) {
     return { success: false, error: 'Brave Search API key is not configured (BRAVE_SEARCH_API_KEY)' };
   }

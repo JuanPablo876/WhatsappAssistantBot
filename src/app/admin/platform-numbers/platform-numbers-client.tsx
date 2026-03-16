@@ -66,13 +66,42 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
   // Add form state
   const [newNumber, setNewNumber] = useState({
     phoneNumber: '',
-    twilioSid: '',
-    countryCode: 'MX',
-    areaCode: '',
+    twilioSid: '',  // Phone Number SID (optional - can be auto-fetched)
     friendlyName: '',
     monthlyPrice: '',
     twilioCost: '',
   });
+
+  // Parse country code from phone number
+  function parsePhoneNumber(phone: string): { countryCode: string; areaCode: string } {
+    const clean = phone.replace(/\D/g, '');
+    
+    // Country code patterns (dialing codes)
+    if (clean.startsWith('52') && clean.length >= 12) {
+      return { countryCode: 'MX', areaCode: clean.substring(2, 4) }; // Mexico +52
+    } else if (clean.startsWith('1') && clean.length === 11) {
+      // US/Canada +1
+      const area = clean.substring(1, 4);
+      // Simple check for Canadian area codes (not exhaustive)
+      const canadianAreas = ['204', '226', '236', '249', '250', '289', '306', '343', '365', '387', '403', '416', '418', '431', '437', '438', '450', '506', '514', '519', '548', '579', '581', '587', '604', '613', '639', '647', '672', '705', '709', '778', '780', '782', '807', '819', '825', '867', '873', '902', '905'];
+      const isCanada = canadianAreas.includes(area);
+      return { countryCode: isCanada ? 'CA' : 'US', areaCode: area };
+    } else if (clean.startsWith('34') && clean.length >= 11) {
+      return { countryCode: 'ES', areaCode: clean.substring(2, 4) }; // Spain +34
+    } else if (clean.startsWith('57') && clean.length >= 12) {
+      return { countryCode: 'CO', areaCode: clean.substring(2, 4) }; // Colombia +57  
+    } else if (clean.startsWith('54') && clean.length >= 12) {
+      return { countryCode: 'AR', areaCode: clean.substring(2, 4) }; // Argentina +54
+    } else if (clean.startsWith('56') && clean.length >= 11) {
+      return { countryCode: 'CL', areaCode: clean.substring(2, 3) }; // Chile +56
+    } else if (clean.startsWith('51') && clean.length >= 11) {
+      return { countryCode: 'PE', areaCode: clean.substring(2, 3) }; // Peru +51
+    } else if (clean.startsWith('44') && clean.length >= 12) {
+      return { countryCode: 'GB', areaCode: clean.substring(2, 5) }; // UK +44
+    }
+    
+    return { countryCode: 'US', areaCode: '' }; // Default
+  }
 
   // Assignment state
   const [assignToTenant, setAssignToTenant] = useState('');
@@ -89,10 +118,13 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
   };
 
   async function addNumber() {
-    if (!newNumber.phoneNumber || !newNumber.twilioSid) {
-      alert('Phone number and Twilio SID are required');
+    if (!newNumber.phoneNumber) {
+      alert('Phone number is required');
       return;
     }
+
+    // Auto-parse country and area code
+    const parsed = parsePhoneNumber(newNumber.phoneNumber);
 
     setSaving(true);
     try {
@@ -101,9 +133,9 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           phoneNumber: newNumber.phoneNumber,
-          twilioSid: newNumber.twilioSid,
-          countryCode: newNumber.countryCode,
-          areaCode: newNumber.areaCode || null,
+          twilioSid: newNumber.twilioSid || `PN_${Date.now()}`, // Auto-generate if not provided
+          countryCode: parsed.countryCode,
+          areaCode: parsed.areaCode || null,
           friendlyName: newNumber.friendlyName || null,
           monthlyPrice: newNumber.monthlyPrice ? parseFloat(newNumber.monthlyPrice) : 0,
           twilioCost: newNumber.twilioCost ? parseFloat(newNumber.twilioCost) : 0,
@@ -209,19 +241,19 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
     <div>
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="p-4 rounded-lg border border-[var(--border)] bg-white">
+        <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)]">
           <div className="text-2xl font-bold">{stats.total}</div>
           <div className="text-sm text-[var(--muted)]">Total Numbers</div>
         </div>
-        <div className="p-4 rounded-lg border border-[var(--border)] bg-white">
-          <div className="text-2xl font-bold text-green-600">{stats.available}</div>
+        <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)]">
+          <div className="text-2xl font-bold text-green-400">{stats.available}</div>
           <div className="text-sm text-[var(--muted)]">Available</div>
         </div>
-        <div className="p-4 rounded-lg border border-[var(--border)] bg-white">
-          <div className="text-2xl font-bold text-blue-600">{stats.assigned}</div>
+        <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)]">
+          <div className="text-2xl font-bold text-blue-400">{stats.assigned}</div>
           <div className="text-sm text-[var(--muted)]">Assigned</div>
         </div>
-        <div className="p-4 rounded-lg border border-[var(--border)] bg-white">
+        <div className="p-4 rounded-lg border border-[var(--border)] bg-[var(--card)]">
           <div className="text-2xl font-bold">${stats.revenue.toFixed(2)}</div>
           <div className="text-sm text-[var(--muted)]">Monthly Revenue</div>
         </div>
@@ -334,7 +366,7 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
       {/* Add Number Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6">
+          <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-xl max-w-lg w-full p-6">
             <div className="flex justify-between items-start mb-4">
               <h2 className="text-lg font-semibold">Add Platform Number</h2>
               <button 
@@ -345,9 +377,10 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
               </button>
             </div>
 
-            <p className="text-sm text-[var(--muted)] mb-4">
-              Add a phone number that was already purchased from Twilio Console.
-            </p>
+            <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 text-sm mb-4">
+              <strong>ℹ️ Note:</strong> This uses the global Twilio credentials from your .env file 
+              (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN). The phone number must already be purchased in your Twilio Console.
+            </div>
 
             <div className="space-y-4">
               <div>
@@ -358,14 +391,17 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
                   type="tel"
                   value={newNumber.phoneNumber}
                   onChange={(e) => setNewNumber({ ...newNumber, phoneNumber: e.target.value })}
-                  placeholder="+523312345678"
+                  placeholder="+1 234 567 8900"
                   className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none font-mono"
                 />
+                <p className="text-xs text-[var(--muted)] mt-1">
+                  Full number with country code (e.g., +1 for US, +52 for MX). Country &amp; area code will be auto-detected.
+                </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-1.5">
-                  Twilio SID <span className="text-red-500">*</span>
+                  Twilio Phone Number SID <span className="text-[var(--muted)] font-normal">(optional)</span>
                 </label>
                 <input
                   type="text"
@@ -374,37 +410,9 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
                   placeholder="PN..."
                   className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none font-mono"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1.5">Country</label>
-                  <select
-                    value={newNumber.countryCode}
-                    onChange={(e) => setNewNumber({ ...newNumber, countryCode: e.target.value })}
-                    className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none"
-                  >
-                    <option value="MX">🇲🇽 Mexico</option>
-                    <option value="US">🇺🇸 United States</option>
-                    <option value="CA">🇨🇦 Canada</option>
-                    <option value="ES">🇪🇸 Spain</option>
-                    <option value="CO">🇨🇴 Colombia</option>
-                    <option value="AR">🇦🇷 Argentina</option>
-                    <option value="CL">🇨🇱 Chile</option>
-                    <option value="PE">🇵🇪 Peru</option>
-                    <option value="GB">🇬🇧 UK</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1.5">Area Code</label>
-                  <input
-                    type="text"
-                    value={newNumber.areaCode}
-                    onChange={(e) => setNewNumber({ ...newNumber, areaCode: e.target.value })}
-                    placeholder="33"
-                    className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none"
-                  />
-                </div>
+                <p className="text-xs text-[var(--muted)] mt-1">
+                  Found in Twilio Console → Phone Numbers → [Your Number]. Leave blank to auto-generate an ID.
+                </p>
               </div>
 
               <div>
@@ -413,7 +421,7 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
                   type="text"
                   value={newNumber.friendlyName}
                   onChange={(e) => setNewNumber({ ...newNumber, friendlyName: e.target.value })}
-                  placeholder="Guadalajara Main Line"
+                  placeholder="Main Business Line"
                   className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none"
                 />
               </div>
@@ -429,7 +437,7 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
                     placeholder="5.00"
                     className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none"
                   />
-                  <p className="text-xs text-[var(--muted)] mt-1">What we charge client</p>
+                  <p className="text-xs text-[var(--muted)] mt-1">What you charge clients</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1.5">Twilio Cost (USD)</label>
@@ -441,7 +449,7 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
                     placeholder="1.15"
                     className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none"
                   />
-                  <p className="text-xs text-[var(--muted)] mt-1">What Twilio charges us</p>
+                  <p className="text-xs text-[var(--muted)] mt-1">What Twilio charges you</p>
                 </div>
               </div>
 
@@ -468,7 +476,7 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
       {/* Manage Number Modal */}
       {selectedNumber && !showTestCallModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6">
+          <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-xl max-w-lg w-full p-6">
             <div className="flex justify-between items-start mb-4">
               <h2 className="text-lg font-semibold">Manage Number</h2>
               <button 
@@ -550,7 +558,7 @@ export function PlatformNumbersClient({ numbers, tenants }: Props) {
       {/* Test Call Modal */}
       {showTestCallModal && selectedNumber && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+          <div className="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-xl max-w-md w-full p-6">
             <div className="flex justify-between items-start mb-4">
               <h2 className="text-lg font-semibold">Test Phone Call</h2>
               <button 

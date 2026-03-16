@@ -549,3 +549,669 @@ export async function listServices(
     },
   };
 }
+
+/**
+ * Make an outbound phone call to a customer.
+ */
+export async function makeCall(
+  args: Record<string, unknown>,
+  context: AgentContext
+): Promise<ToolResult> {
+  try {
+    // Check if calls are enabled for this tenant
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: context.tenantId },
+      include: {
+        voiceConfig: true,
+        businessProfile: true,
+      },
+    });
+
+    if (!tenant?.voiceConfig?.callsEnabled) {
+      return {
+        success: false,
+        error: 'Phone calls are not enabled for this business. Please enable them in Dashboard → Voice settings.',
+      };
+    }
+
+    // Import Twilio module dynamically to avoid circular dependencies
+    const { makeOutboundCall, isTwilioConfigured } = await import('@/lib/voice/twilio');
+
+    if (!isTwilioConfigured()) {
+      return {
+        success: false,
+        error: 'Twilio phone service is not configured. Please set up Twilio credentials.',
+      };
+    }
+
+    // Get the phone number to call
+    let phoneNumber = args.phone_number as string | undefined;
+    
+    if (!phoneNumber) {
+      // Use the current customer's phone if not specified
+      phoneNumber = context.contactPhone;
+    }
+
+    if (!phoneNumber) {
+      return {
+        success: false,
+        error: 'No phone number provided and could not determine customer phone number.',
+      };
+    }
+
+    // Normalize phone number
+    const normalizedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber.replace(/\D/g, '')}`;
+
+    const greeting = args.greeting as string || 
+      `Hello, this is ${tenant.businessProfile?.businessName || tenant.name || 'your service provider'}. How can I assist you today?`;
+    
+    const reason = args.reason as string || 'AI-initiated callback';
+
+    logger.info({ 
+      tenantId: context.tenantId, 
+      phone: normalizedPhone, 
+      reason 
+    }, 'AI agent initiating outbound call');
+
+    // Make the call
+    const result = await makeOutboundCall(normalizedPhone, {
+      tenantId: context.tenantId,
+      greeting,
+      recordCall: tenant.voiceConfig.callRecordingEnabled ?? false,
+      timeout: 30,
+    });
+
+    return {
+      success: true,
+      data: {
+        callSid: result.callSid,
+        status: result.status,
+        phoneNumber: normalizedPhone,
+        greeting,
+        message: `Call initiated to ${normalizedPhone}. The call is now ${result.status}. The customer will receive the call momentarily.`,
+      },
+    };
+  } catch (error) {
+    logger.error({ error, args }, 'Error making outbound call');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      success: false,
+      error: `Failed to initiate call: ${errorMessage}`,
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CONCIERGE TOOLS - External business search & booking
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Search for nearby businesses (spas, restaurants, hotels, etc.)
+ * Uses Brave Search or Google Places, depending on configuration.
+ */
+export async function searchPlaces(
+  args: Record<string, unknown>,
+  context: AgentContext
+): Promise<ToolResult> {
+  try {
+    const { searchBusinesses, formatSearchResultsForChat } = await import('./search-providers');
+    
+    const query = args.query as string;
+    const location = args.location as string;
+    const minRating = args.min_rating as number | undefined;
+
+    if (!query) {
+      return {
+        success: false,
+        error: 'Please specify what type of place you\'re looking for (e.g., "spa", "restaurant").',
+      };
+    }
+
+    if (!location) {
+      return {
+        success: false,
+        error: 'I need to know where to search. What city or area are you looking in?',
+      };
+    }
+
+    const results = await searchBusinesses(query, location, 5);
+
+    // Filter by rating if requested
+    const filtered = minRating 
+      ? results.filter(r => !r.rating || r.rating >= minRating)
+      : results;
+
+    if (filtered.length === 0) {
+      return {
+        success: true,
+        data: {
+          message: `I couldn't find any "${query}" in ${location}. Try a different location or search term.`,
+          businesses: [],
+        },
+      };
+    }
+
+    // Format results for the AI to present nicely
+    const formatted = filtered.map((b, i) => ({
+      number: i + 1,
+      placeId: b.placeId || `${b.name}-${i}`, // Use placeId if available (Google)
+      name: b.name,
+      address: b.address || 'Address not available',
+      rating: b.rating ? `${b.rating}★${b.reviewCount ? ` (${b.reviewCount} reviews)` : ''}` : 'Not rated',
+      priceLevel: b.priceLevel || '',
+      phone: b.phone || null,
+      website: b.website || null,
+      source: b.source,
+    }));
+
+    return {
+      success: true,
+      data: {
+        searchQuery: query,
+        location,
+        count: formatted.length,
+        businesses: formatted,
+        message: `Found ${formatted.length} ${query} options in ${location}. Ask the user which one they'd like more details about, or if they want to make a reservation.`,
+      },
+    };
+  } catch (error) {
+    logger.error({ error, args }, 'Error searching places');
+    return {
+      success: false,
+      error: 'Failed to search for places. Please try again.',
+    };
+  }
+}
+
+/**
+ * Get detailed information about a specific business
+ */
+export async function getPlaceDetails(
+  args: Record<string, unknown>,
+  context: AgentContext
+): Promise<ToolResult> {
+  try {
+    const { googlePlaceDetails } = await import('./search-providers');
+    
+    const placeId = args.place_id as string;
+    const placeName = args.place_name as string || 'this place';
+
+    if (!placeId) {
+      return {
+        success: false,
+        error: 'Missing place ID. Use search_places first to find businesses.',
+      };
+    }
+
+    const result = await googlePlaceDetails(placeId);
+
+    if (!result) {
+      return {
+        success: false,
+        error: 'Could not get business details. The place ID may be invalid.',
+      };
+    }
+    
+    return {
+      success: true,
+      data: {
+        name: result.name,
+        address: result.address || 'Not available',
+        phone: result.phone || 'Not available',
+        rating: result.rating ? `${result.rating}★${result.reviewCount ? ` (${result.reviewCount} reviews)` : ''}` : 'Not rated',
+        priceLevel: result.priceLevel || 'Not specified',
+        website: result.website || 'Not available',
+        hours: result.hours || 'Hours not available',
+        canCall: !!result.phone,
+        message: result.phone 
+          ? `Here are the details for ${result.name}. If the user wants to make a reservation, use the book_external tool with the phone number.`
+          : `Here are the details for ${result.name}. Unfortunately, no phone number is available for booking.`,
+      },
+    };
+  } catch (error) {
+    logger.error({ error, args }, 'Error getting place details');
+    return {
+      success: false,
+      error: 'Failed to get place details.',
+    };
+  }
+}
+
+/**
+ * Book/reserve at an external business by calling them
+ */
+export async function bookExternal(
+  args: Record<string, unknown>,
+  context: AgentContext
+): Promise<ToolResult> {
+  try {
+    const businessName = args.business_name as string;
+    const phoneNumber = args.phone_number as string;
+    const reservationDetails = args.reservation_details as string;
+    const customerName = args.customer_name as string || 'Customer';
+
+    if (!businessName || !phoneNumber) {
+      return {
+        success: false,
+        error: 'Missing business name or phone number for booking.',
+      };
+    }
+
+    if (!reservationDetails) {
+      return {
+        success: false,
+        error: 'Please provide reservation details (date, time, party size, service type, etc.).',
+      };
+    }
+
+    // Check if calls are enabled
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: context.tenantId },
+      include: { voiceConfig: true, businessProfile: true },
+    });
+
+    if (!tenant?.voiceConfig?.callsEnabled) {
+      // If calls aren't enabled, provide the info for manual booking
+      return {
+        success: true,
+        data: {
+          manualBooking: true,
+          businessName,
+          phone: phoneNumber,
+          details: reservationDetails,
+          message: `Phone calls are not enabled. Please have the customer call ${businessName} directly at ${phoneNumber} with these details: ${reservationDetails}`,
+        },
+      };
+    }
+
+    // Import Twilio module
+    const { makeOutboundCall, isTwilioConfigured } = await import('@/lib/voice/twilio');
+
+    if (!isTwilioConfigured()) {
+      return {
+        success: true,
+        data: {
+          manualBooking: true,
+          businessName,
+          phone: phoneNumber,
+          details: reservationDetails,
+          message: `Twilio is not configured. Please have the customer call ${businessName} directly at ${phoneNumber}.`,
+        },
+      };
+    }
+
+    // Normalize phone number
+    const normalizedPhone = phoneNumber.startsWith('+') 
+      ? phoneNumber 
+      : `+${phoneNumber.replace(/\D/g, '')}`;
+
+    // Create a greeting for the business
+    const greeting = `Hello, I'm calling on behalf of ${customerName} to make a reservation. ${reservationDetails}. Is that available?`;
+
+    logger.info({ 
+      tenantId: context.tenantId, 
+      business: businessName,
+      phone: normalizedPhone,
+      details: reservationDetails,
+    }, 'AI agent calling external business for reservation');
+
+    // Make the call to the business
+    const result = await makeOutboundCall(normalizedPhone, {
+      tenantId: context.tenantId,
+      greeting,
+      recordCall: true, // Record external booking calls for reference
+      timeout: 45, // Give more time for business to answer
+    });
+
+    return {
+      success: true,
+      data: {
+        callSid: result.callSid,
+        status: result.status,
+        businessName,
+        phoneNumber: normalizedPhone,
+        reservationDetails,
+        customerName,
+        message: `I'm now calling ${businessName} at ${phoneNumber} to make your reservation. The call status is: ${result.status}. I'll attempt to book: ${reservationDetails}. Please wait for confirmation.`,
+      },
+    };
+  } catch (error) {
+    logger.error({ error, args }, 'Error booking at external business');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      success: false,
+      error: `Failed to call the business: ${errorMessage}. You can try calling them directly.`,
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// WEB SEARCH TOOL
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Search the web for information.
+ * Uses Brave Search or Google Custom Search depending on configuration.
+ */
+export async function webSearchTool(
+  args: Record<string, unknown>,
+  context: AgentContext
+): Promise<ToolResult> {
+  try {
+    const { webSearch } = await import('./search-providers');
+    
+    const query = args.query as string;
+
+    if (!query) {
+      return {
+        success: false,
+        error: 'Please provide a search query.',
+      };
+    }
+
+    const results = await webSearch(query, 5);
+
+    if (results.length === 0) {
+      // Check if search is configured
+      if (!process.env.BRAVE_SEARCH_API_KEY && !process.env.GOOGLE_SEARCH_API_KEY) {
+        return {
+          success: false,
+          error: 'Web search is not configured. Please set up Brave Search or Google Custom Search API.',
+        };
+      }
+      return {
+        success: true,
+        data: {
+          query,
+          results: [],
+          message: `No results found for "${query}". Try a different search term.`,
+        },
+      };
+    }
+
+    // Format results for the AI
+    const formatted = results.map((r, i) => ({
+      number: i + 1,
+      title: r.title,
+      url: r.url,
+      description: r.description,
+      source: r.source,
+    }));
+
+    return {
+      success: true,
+      data: {
+        query,
+        count: formatted.length,
+        results: formatted,
+        message: `Found ${formatted.length} web results. Use these to answer the user's question.`,
+      },
+    };
+  } catch (error) {
+    logger.error({ error, args }, 'Error performing web search');
+    return {
+      success: false,
+      error: 'Web search failed. Please try again.',
+    };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// META / REASONING TOOLS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Discover available tools and skills by keyword search
+ */
+export async function discoverTools(
+  args: Record<string, unknown>,
+  context: AgentContext
+): Promise<ToolResult> {
+  try {
+    const query = (args.query as string || '').toLowerCase();
+    const includeSkills = args.include_skills !== false;
+
+    // Define tool capabilities with metadata
+    const toolCapabilities = [
+      { name: 'check_availability', category: 'scheduling', keywords: ['availability', 'slots', 'free', 'time', 'date', 'open'], 
+        description: 'Check available appointment time slots for a specific date' },
+      { name: 'create_appointment', category: 'scheduling', keywords: ['book', 'appointment', 'schedule', 'reserve', 'create'],
+        description: 'Book a new appointment for the client' },
+      { name: 'cancel_appointment', category: 'scheduling', keywords: ['cancel', 'remove', 'delete', 'appointment'],
+        description: 'Cancel an existing appointment' },
+      { name: 'reschedule_appointment', category: 'scheduling', keywords: ['reschedule', 'move', 'change', 'appointment', 'new time'],
+        description: 'Move an appointment to a new date/time' },
+      { name: 'list_appointments', category: 'scheduling', keywords: ['list', 'show', 'appointments', 'upcoming', 'my'],
+        description: 'Show client\'s upcoming confirmed appointments' },
+      { name: 'list_services', category: 'scheduling', keywords: ['services', 'offerings', 'types', 'prices', 'menu'],
+        description: 'List available services with duration and price' },
+      { name: 'make_call', category: 'communication', keywords: ['call', 'phone', 'callback', 'ring', 'dial'],
+        description: 'Make an outbound phone call to a customer' },
+      { name: 'search_places', category: 'concierge', keywords: ['search', 'find', 'nearby', 'places', 'restaurant', 'spa', 'hotel', 'business'],
+        description: 'Search for nearby businesses (requires location)' },
+      { name: 'get_place_details', category: 'concierge', keywords: ['details', 'info', 'hours', 'phone', 'reviews', 'place'],
+        description: 'Get detailed information about a specific business' },
+      { name: 'book_external', category: 'concierge', keywords: ['book', 'reserve', 'external', 'restaurant', 'reservation', 'call'],
+        description: 'Help book at an external business by calling them' },
+      { name: 'web_search', category: 'search', keywords: ['search', 'web', 'google', 'lookup', 'find', 'information', 'facts'],
+        description: 'Search the web for information' },
+      { name: 'think', category: 'reasoning', keywords: ['think', 'reason', 'plan', 'reflect', 'organize'],
+        description: 'Record reasoning steps for complex tasks' },
+      { name: 'lookup_skill', category: 'skills', keywords: ['skill', 'lookup', 'knowledge', 'guidance'],
+        description: 'Get detailed guidance from a specific skill' },
+    ];
+
+    // Search tools by keyword match
+    const matchingTools = toolCapabilities.filter(tool => {
+      if (tool.name.includes(query)) return true;
+      if (tool.category.includes(query)) return true;
+      if (tool.description.toLowerCase().includes(query)) return true;
+      return tool.keywords.some(k => k.includes(query) || query.includes(k));
+    });
+
+    // Search skills from database if requested
+    let matchingSkills: { id: string; title: string; summary: string; category: string }[] = [];
+    if (includeSkills) {
+      try {
+        const skills = await prisma.agentSkill.findMany({
+          where: {
+            reviewStatus: 'REVIEWED',
+            OR: [
+              { title: { contains: query } },
+              { summary: { contains: query } },
+              { category: { contains: query } },
+            ]
+          },
+          select: { id: true, title: true, summary: true, category: true },
+          take: 5
+        });
+        matchingSkills = skills.map(s => ({
+          id: s.id,
+          title: s.title,
+          summary: s.summary || '',
+          category: s.category
+        }));
+      } catch {
+        // Skill search failed, continue without skills
+      }
+    }
+
+    const toolResults = matchingTools.map(t => ({
+      name: t.name,
+      category: t.category,
+      description: t.description,
+      type: 'tool' as const
+    }));
+
+    const skillResults = matchingSkills.map(s => ({
+      name: `skill:${s.id.slice(0, 8)}`,
+      category: s.category,
+      description: `[SKILL] ${s.title}: ${s.summary}`,
+      type: 'skill' as const,
+      skill_id: s.id
+    }));
+
+    const allResults = [...toolResults, ...skillResults];
+
+    if (allResults.length === 0) {
+      return {
+        success: true,
+        data: {
+          query,
+          results: [],
+          message: `No tools or skills found matching "${query}". Available categories: scheduling, communication, concierge, search, reasoning.`,
+          hint: 'Try broader terms like "book", "call", "search", or "find".'
+        }
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        query,
+        count: allResults.length,
+        results: allResults,
+        message: `Found ${allResults.length} matching capabilities. Use these tools to help the user.`
+      }
+    };
+  } catch (error) {
+    logger.error({ error, args }, 'Error discovering tools');
+    return {
+      success: false,
+      error: 'Failed to search tools. Use the tools you know about.'
+    };
+  }
+}
+
+/**
+ * Record a reasoning step in the scratchpad
+ */
+export async function thinkStep(
+  args: Record<string, unknown>,
+  context: AgentContext
+): Promise<ToolResult> {
+  try {
+    const { scratchpad } = await import('./reasoning-scratchpad');
+    
+    const thought = args.thought as string;
+    const stepType = (args.step_type as string) || 'thought';
+    const confidence = args.confidence as number | undefined;
+
+    if (!thought) {
+      return {
+        success: false,
+        error: 'Please provide a thought to record.'
+      };
+    }
+
+    // Use conversation ID or contact phone as session ID
+    const sessionId = context.conversationId || context.contactPhone || 'default';
+
+    // Ensure chain exists
+    let chain = scratchpad.getChain(sessionId);
+    if (!chain) {
+      chain = scratchpad.startChain(sessionId, 'Assist with user request');
+    }
+
+    // Record the step based on type
+    let step;
+    switch (stepType) {
+      case 'observation':
+        step = scratchpad.observe(sessionId, thought);
+        break;
+      case 'plan':
+        step = scratchpad.plan(sessionId, thought);
+        break;
+      case 'reflection':
+        step = scratchpad.reflect(sessionId, thought);
+        break;
+      default:
+        step = scratchpad.think(sessionId, thought, confidence);
+    }
+
+    // Get recent context
+    const recentSteps = scratchpad.getRecentSteps(sessionId, 5);
+
+    return {
+      success: true,
+      data: {
+        recorded: thought,
+        type: stepType,
+        totalSteps: chain.steps.length,
+        recentContext: recentSteps.map(s => `${s.type}: ${s.content.slice(0, 100)}`),
+        message: 'Thought recorded. Continue with your reasoning or take action.'
+      }
+    };
+  } catch (error) {
+    logger.error({ error, args }, 'Error recording thought');
+    return {
+      success: false,
+      error: 'Failed to record thought, but continue with your task.'
+    };
+  }
+}
+
+/**
+ * Look up a specific skill by ID for detailed guidance
+ */
+export async function lookupSkill(
+  args: Record<string, unknown>,
+  context: AgentContext
+): Promise<ToolResult> {
+  try {
+    const skillId = args.skill_id as string;
+
+    if (!skillId) {
+      return {
+        success: false,
+        error: 'Please provide a skill_id to look up.'
+      };
+    }
+
+    // Handle both full ID and short ID (from discover_tools)
+    const skill = await prisma.agentSkill.findFirst({
+      where: {
+        OR: [
+          { id: skillId },
+          { id: { startsWith: skillId } }
+        ]
+      }
+    });
+
+    if (!skill) {
+      return {
+        success: false,
+        error: `Skill not found: ${skillId}. Use discover_tools to find available skills.`
+      };
+    }
+
+    // Update usage count
+    await prisma.agentSkill.update({
+      where: { id: skill.id },
+      data: { 
+        usageCount: { increment: 1 },
+        lastUsedAt: new Date()
+      }
+    });
+
+    return {
+      success: true,
+      data: {
+        id: skill.id,
+        title: skill.title,
+        category: skill.category,
+        summary: skill.summary,
+        workflow_guidance: skill.workflowGuidance,
+        implementation_notes: skill.implementationNotes,
+        code_snippets: skill.codeSnippets,
+        message: 'Use this guidance to help the user. Follow the workflow steps carefully.'
+      }
+    };
+  } catch (error) {
+    logger.error({ error, args }, 'Error looking up skill');
+    return {
+      success: false,
+      error: 'Failed to retrieve skill. Continue with your best judgment.'
+    };
+  }
+}

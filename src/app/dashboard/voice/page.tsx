@@ -77,6 +77,9 @@ export default async function VoicePage() {
             openaiVoice: voiceConfig.openaiVoice,
             openaiModel: voiceConfig.openaiModel,
             openaiSpeed: voiceConfig.openaiSpeed,
+            callTtsProvider: (voiceConfig.callTtsProvider || 'twilio') as 'twilio' | 'elevenlabs',
+            callPollyVoice: voiceConfig.callPollyVoice || 'Polly.Joanna-Neural',
+            callRecordingEnabled: voiceConfig.callRecordingEnabled ?? false,
           } : null}
           hasElevenLabsKey={!!voiceConfig?.apiKey || !!process.env.ELEVENLABS_API_KEY}
         />

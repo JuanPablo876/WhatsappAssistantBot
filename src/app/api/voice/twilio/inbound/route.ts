@@ -92,6 +92,7 @@ export async function POST(request: NextRequest) {
           greeting: "I didn't catch that. ",
           gatherUrl: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenant.id}`,
           language: tenant.voiceConfig?.callLanguage || 'en-US',
+          voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
         }),
         { headers: { 'Content-Type': 'text/xml' } }
       );
@@ -115,6 +116,9 @@ export async function POST(request: NextRequest) {
       greeting,
       gatherUrl: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenant.id}`,
       language: tenant.voiceConfig?.callLanguage || 'en-US',
+      voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
+      recordCall: tenant.voiceConfig?.callRecordingEnabled || false,
+      recordingStatusCallback: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/status`,
     });
 
     return new NextResponse(twiml, {

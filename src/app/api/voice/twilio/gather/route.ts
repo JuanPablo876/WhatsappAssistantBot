@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/bot/logger';
-import { generateGatherTwiML } from '@/lib/voice/twilio';
+import { generateGatherTwiML, generatePlayAudioTwiML } from '@/lib/voice/twilio';
 import { complete } from '@/lib/bot/ai-provider';
+import { ElevenLabsService } from '@/lib/voice/elevenlabs';
+import { storeAudio, generateAudioId } from '@/lib/voice/audio-cache';
 
 const TWILIO_WEBHOOK_URL = process.env.TWILIO_WEBHOOK_URL || 'https://iatransmisor.com';
 
@@ -141,16 +143,61 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Option 1: Use Twilio's built-in TTS (fast, decent quality)
-    // Option 2: Use ElevenLabs for higher quality (requires audio URL)
-    
-    // For now, use Twilio's TTS for speed
-    // TODO: Add ElevenLabs integration for Pro tier
-    const twiml = generateGatherTwiML({
-      message: aiResponse,
-      nextUrl: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenantId}`,
-      language: tenant.voiceConfig.callLanguage || 'en-US',
-    });
+    // Check which TTS provider to use for calls
+    const callTtsProvider = tenant.voiceConfig.callTtsProvider || 'twilio';
+    const nextUrl = `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenantId}`;
+    let twiml: string;
+
+    if (callTtsProvider === 'elevenlabs') {
+      // Use ElevenLabs for higher quality voice
+      try {
+        const apiKey = tenant.voiceConfig.apiKey || process.env.ELEVENLABS_API_KEY;
+        if (!apiKey) {
+          throw new Error('ElevenLabs API key not configured');
+        }
+
+        const elevenlabs = new ElevenLabsService(apiKey);
+        const voiceId = tenant.voiceConfig.callVoiceId || tenant.voiceConfig.voiceId || '21m00Tcm4TlvDq8ikWAM';
+        
+        // Generate audio
+        const audio = await elevenlabs.textToSpeech(aiResponse, {
+          voiceId,
+          stability: tenant.voiceConfig.stability,
+          similarityBoost: tenant.voiceConfig.similarityBoost,
+        });
+
+        // Store in shared cache for serving
+        const audioId = generateAudioId();
+        storeAudio(audioId, audio);
+
+        // Use Play TwiML with audio URL
+        const audioUrl = `${TWILIO_WEBHOOK_URL}/api/voice/elevenlabs/audio?id=${audioId}`;
+        twiml = generatePlayAudioTwiML({
+          audioUrl,
+          gatherUrl: nextUrl,
+          language: tenant.voiceConfig.callLanguage || 'en-US',
+        });
+
+        logger.info({ audioId, ttsProvider: 'elevenlabs' }, 'Using ElevenLabs TTS for call');
+      } catch (error) {
+        // Fallback to Twilio TTS on error
+        logger.error({ error }, 'ElevenLabs TTS failed, falling back to Twilio');
+        twiml = generateGatherTwiML({
+          message: aiResponse,
+          nextUrl,
+          language: tenant.voiceConfig.callLanguage || 'en-US',
+        });
+      }
+    } else {
+      // Use Twilio's built-in TTS (Polly) with Neural voice
+      const voiceName = tenant.voiceConfig.callPollyVoice || 'Polly.Joanna-Neural';
+      twiml = generateGatherTwiML({
+        message: aiResponse,
+        nextUrl,
+        language: tenant.voiceConfig.callLanguage || 'en-US',
+        voiceName,
+      });
+    }
 
     return new NextResponse(twiml, {
       headers: { 'Content-Type': 'text/xml' },

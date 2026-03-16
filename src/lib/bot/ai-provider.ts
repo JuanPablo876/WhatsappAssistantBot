@@ -60,10 +60,11 @@ function getClient(): OpenAI {
 function getDefaultModel(): string {
   const provider = getProvider();
   if (provider === 'ollama') {
-    // Common Ollama models: llama3.2, mistral, codellama, phi3
+    // Common Ollama models: llama3.2, mistral, codellama, phi3, qwen2.5
     return process.env.AI_MODEL || 'llama3.2';
   }
-  return process.env.AI_MODEL || 'gpt-4o-mini';
+  // OpenAI models: gpt-5-mini (fast/cheap), gpt-5.4 (flagship), gpt-4.1
+  return process.env.AI_MODEL || 'gpt-5-mini';
 }
 
 export async function complete(options: AICompletionOptions): Promise<AICompletionResult> {

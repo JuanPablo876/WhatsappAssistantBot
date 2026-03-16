@@ -3,8 +3,8 @@ import { logger } from '../bot/logger';
 
 const VoiceResponse = Twilio.twiml.VoiceResponse;
 
-// Default voice settings
-const DEFAULT_VOICE = 'Polly.Joanna';
+// Default voice settings - use Neural voices for better quality
+const DEFAULT_VOICE = 'Polly.Joanna-Neural';
 const DEFAULT_LANGUAGE = 'en-US';
 
 /**
@@ -103,11 +103,27 @@ export function generateInboundCallTwiML(options: {
   gatherUrl: string;
   voiceName?: string;
   language?: string;
+  recordCall?: boolean;
+  recordingStatusCallback?: string;
 }): string {
   const response = new VoiceResponse();
   const voice = (options.voiceName || DEFAULT_VOICE) as any;
   const language = (options.language || DEFAULT_LANGUAGE) as any;
   
+  // Enable call recording if requested
+  if (options.recordCall) {
+    response.record({
+      recordingStatusCallback: options.recordingStatusCallback || `${TWILIO_WEBHOOK_URL}/api/voice/twilio/status`,
+      recordingStatusCallbackMethod: 'POST',
+      transcribe: false, // We do our own transcription
+      playBeep: false,
+      maxLength: 3600, // 1 hour max
+      timeout: 10, // Timeout after 10s of silence
+    });
+    // Actually we want to record during conversation, so use dual-channel recording
+    // Record attribute will be handled in the start of the call
+  }
+
   // Say the greeting with natural voice
   response.say({ voice, language }, options.greeting);
 

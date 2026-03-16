@@ -4,6 +4,19 @@ import { spawn, ChildProcess, execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 
+// Simple semver comparison: returns 1 if a > b, -1 if a < b, 0 if equal
+function compareVersions(a: string, b: string): number {
+  const partsA = a.replace(/^v/, '').split('.').map(Number);
+  const partsB = b.replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+    const numA = partsA[i] || 0;
+    const numB = partsB[i] || 0;
+    if (numA > numB) return 1;
+    if (numA < numB) return -1;
+  }
+  return 0;
+}
+
 let mainWindow: BrowserWindow | null = null;
 let nextServer: ChildProcess | null = null;
 let serverPid: number | null = null;
@@ -64,7 +77,7 @@ function parseEnvFile(envPath: string): Record<string, string> {
       vars[key] = value;
     }
     
-    writeLog(`Loaded ${Object.keys(vars).length} variables from .env`);
+    writeLog(`Loaded ${Object.keys(vars).length} variables from .env: ${Object.keys(vars).join(', ')}`);
   } catch (err: any) {
     writeLog(`Failed to parse .env: ${err.message}`);
   }
@@ -211,20 +224,51 @@ function createWindow(): void {
             return;
           }
           writeLog('Manual update check requested');
+          
+          // Show "checking" dialog
+          const currentVersion = app.getVersion();
+          
           autoUpdater.checkForUpdates().then((result) => {
             if (!result || !result.updateInfo) {
               dialog.showMessageBox(mainWindow!, {
                 type: 'info',
                 title: 'No Updates',
                 message: 'You are running the latest version.',
+                detail: `Current version: ${currentVersion}`,
+              });
+              return;
+            }
+            
+            const availableVersion = result.updateInfo.version;
+            // Compare versions - if available version is same or older, no update
+            if (availableVersion === currentVersion || compareVersions(availableVersion, currentVersion) <= 0) {
+              dialog.showMessageBox(mainWindow!, {
+                type: 'info',
+                title: 'No Updates',
+                message: 'You are running the latest version.',
+                detail: `Current version: ${currentVersion}`,
               });
             }
+            // If update IS available, the 'update-available' event handler will show the dialog
           }).catch((err) => {
-            dialog.showMessageBox(mainWindow!, {
-              type: 'error',
-              title: 'Update Check Failed',
-              message: `Could not check for updates: ${err.message}`,
-            });
+            // Handle common cases gracefully
+            const errorMsg = err.message || '';
+            if (errorMsg.includes('404') || errorMsg.includes('Not Found') || 
+                errorMsg.includes('No published versions') || errorMsg.includes('no releases')) {
+              dialog.showMessageBox(mainWindow!, {
+                type: 'info',
+                title: 'No Updates Available',
+                message: 'You are running the latest version.',
+                detail: `Current version: ${currentVersion}`,
+              });
+            } else {
+              dialog.showMessageBox(mainWindow!, {
+                type: 'error',
+                title: 'Update Check Failed',
+                message: 'Could not check for updates.',
+                detail: errorMsg,
+              });
+            }
           });
         }},
         { type: 'separator' },
@@ -402,6 +446,9 @@ function startNextServer(): void {
   // Load .env file from standalone directory
   const envFilePath = path.join(standaloneDir, '.env');
   const envVars = parseEnvFile(envFilePath);
+  
+  // Debug: Confirm BRAVE key is loaded
+  writeLog(`BRAVE_SEARCH_API_KEY loaded: ${!!envVars.BRAVE_SEARCH_API_KEY}, length: ${envVars.BRAVE_SEARCH_API_KEY?.length || 0}`);
 
   nextServer = spawn(nodePath, [serverScript], {
     cwd: standaloneDir,

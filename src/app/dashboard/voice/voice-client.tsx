@@ -24,7 +24,37 @@ const OPENAI_VOICES = [
   { id: 'shimmer', name: 'Shimmer', desc: 'Soft and calm' },
 ];
 
+// Neural Polly voices for Twilio phone calls
+const POLLY_NEURAL_VOICES = [
+  // English (US)
+  { id: 'Polly.Joanna-Neural', name: 'Joanna', desc: 'US Female - Natural', language: 'en-US' },
+  { id: 'Polly.Matthew-Neural', name: 'Matthew', desc: 'US Male - Confident', language: 'en-US' },
+  { id: 'Polly.Kendra-Neural', name: 'Kendra', desc: 'US Female - Warm', language: 'en-US' },
+  { id: 'Polly.Joey-Neural', name: 'Joey', desc: 'US Male - Casual', language: 'en-US' },
+  { id: 'Polly.Ruth-Neural', name: 'Ruth', desc: 'US Female - Clear', language: 'en-US' },
+  { id: 'Polly.Stephen-Neural', name: 'Stephen', desc: 'US Male - Professional', language: 'en-US' },
+  // English (UK)
+  { id: 'Polly.Amy-Neural', name: 'Amy', desc: 'UK Female - Elegant', language: 'en-GB' },
+  { id: 'Polly.Emma-Neural', name: 'Emma', desc: 'UK Female - Friendly', language: 'en-GB' },
+  { id: 'Polly.Brian-Neural', name: 'Brian', desc: 'UK Male - Authoritative', language: 'en-GB' },
+  // Spanish
+  { id: 'Polly.Lupe-Neural', name: 'Lupe', desc: 'MX Female - Natural', language: 'es-MX' },
+  { id: 'Polly.Pedro-Neural', name: 'Pedro', desc: 'MX Male - Conversational', language: 'es-MX' },
+  { id: 'Polly.Mia-Neural', name: 'Mia', desc: 'MX Female - Warm', language: 'es-MX' },
+  { id: 'Polly.Lucia-Neural', name: 'Lucía', desc: 'ES Female - Clear', language: 'es-ES' },
+  // Portuguese
+  { id: 'Polly.Camila-Neural', name: 'Camila', desc: 'BR Female - Friendly', language: 'pt-BR' },
+  { id: 'Polly.Vitoria-Neural', name: 'Vitória', desc: 'BR Female - Natural', language: 'pt-BR' },
+  // French
+  { id: 'Polly.Lea-Neural', name: 'Léa', desc: 'FR Female - Elegant', language: 'fr-FR' },
+  { id: 'Polly.Remi-Neural', name: 'Rémi', desc: 'FR Male - Natural', language: 'fr-FR' },
+  // German
+  { id: 'Polly.Vicki-Neural', name: 'Vicki', desc: 'DE Female - Clear', language: 'de-DE' },
+  { id: 'Polly.Daniel-Neural', name: 'Daniel', desc: 'DE Male - Professional', language: 'de-DE' },
+];
+
 type TTSProvider = 'openai' | 'elevenlabs';
+type CallTTSProvider = 'twilio' | 'elevenlabs';
 
 interface Props {
   config: {
@@ -37,6 +67,9 @@ interface Props {
     openaiVoice: string;
     openaiModel: string;
     openaiSpeed: number;
+    callTtsProvider: CallTTSProvider;
+    callPollyVoice: string;
+    callRecordingEnabled: boolean;
   } | null;
   hasElevenLabsKey?: boolean;
 }
@@ -55,6 +88,11 @@ export function VoiceSetupClient({ config, hasElevenLabsKey }: Props) {
     openaiVoice: config?.openaiVoice || 'nova',
     openaiModel: config?.openaiModel || 'tts-1',
     openaiSpeed: config?.openaiSpeed ?? 1.0,
+    // Phone call TTS provider
+    callTtsProvider: config?.callTtsProvider ?? 'twilio' as CallTTSProvider,
+    // Twilio/Polly settings
+    callPollyVoice: config?.callPollyVoice || 'Polly.Joanna-Neural',
+    callRecordingEnabled: config?.callRecordingEnabled ?? false,
   });
   const [saving, setSaving] = useState(false);
 
@@ -139,6 +177,105 @@ export function VoiceSetupClient({ config, hasElevenLabsKey }: Props) {
           </div>
         </div>
       </div>
+
+      {/* Phone Call Voice Provider - only shown when calls are enabled */}
+      {form.callsEnabled && (
+        <div className="card p-6">
+          <h3 className="font-semibold mb-3">📞 Phone Call Voice</h3>
+          <p className="text-sm text-[var(--muted)] mb-4">
+            Choose which TTS provider to use for phone calls.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button
+              onClick={() => setForm({ ...form, callTtsProvider: 'twilio' })}
+              className={`p-4 rounded-lg border text-left transition-all ${
+                form.callTtsProvider === 'twilio'
+                  ? 'border-[var(--primary)] bg-[var(--primary-light)]'
+                  : 'border-[var(--border)] hover:border-[var(--border-light)]'
+              }`}
+            >
+              <div className="font-medium">Twilio (Polly Neural)</div>
+              <div className="text-xs text-[var(--muted)] mt-1">
+                Built-in Amazon Polly Neural TTS. Fast, reliable, included in Twilio cost.
+              </div>
+              <div className="text-xs text-green-500 mt-2">✓ No extra latency or cost</div>
+            </button>
+            <button
+              onClick={() => setForm({ ...form, callTtsProvider: 'elevenlabs' })}
+              className={`p-4 rounded-lg border text-left transition-all ${
+                form.callTtsProvider === 'elevenlabs'
+                  ? 'border-[var(--primary)] bg-[var(--primary-light)]'
+                  : 'border-[var(--border)] hover:border-[var(--border-light)]'
+              }`}
+            >
+              <div className="font-medium">ElevenLabs</div>
+              <div className="text-xs text-[var(--muted)] mt-1">
+                Premium voice quality. Adds ~0.5-1s latency and ElevenLabs API cost.
+              </div>
+              <div className="text-xs text-amber-500 mt-2">Requires ElevenLabs API key in Settings</div>
+            </button>
+          </div>
+
+          {/* Neural Polly Voice Selection - only when Twilio is selected */}
+          {form.callTtsProvider === 'twilio' && (
+            <div className="mt-6">
+              <label className="block text-sm font-medium mb-2">Neural Voice</label>
+              <p className="text-xs text-[var(--muted)] mb-3">
+                Select a neural voice for natural-sounding phone conversations.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                {POLLY_NEURAL_VOICES.map((voice) => (
+                  <button
+                    key={voice.id}
+                    onClick={() => setForm({ ...form, callPollyVoice: voice.id })}
+                    className={`p-3 rounded-lg border text-left transition-all ${
+                      form.callPollyVoice === voice.id
+                        ? 'border-[var(--primary)] bg-[var(--primary-light)]'
+                        : 'border-[var(--border)] hover:border-[var(--border-light)]'
+                    }`}
+                  >
+                    <div className="font-medium text-sm">{voice.name}</div>
+                    <div className="text-xs text-[var(--muted)]">{voice.desc}</div>
+                    <div className="text-xs text-blue-500 mt-1">{voice.language}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Call Recording Toggle */}
+          <div className="mt-6 pt-6 border-t border-[var(--border)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-medium">🔴 Call Recording</h4>
+                <p className="text-xs text-[var(--muted)] mt-1">
+                  Record calls for quality assurance and AI analysis
+                </p>
+              </div>
+              <button
+                onClick={() => setForm({ ...form, callRecordingEnabled: !form.callRecordingEnabled })}
+                className={`w-12 h-6 rounded-full transition-colors ${
+                  form.callRecordingEnabled ? 'bg-red-500' : 'bg-[var(--border)]'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-full bg-white mt-0.5 transition-transform ${
+                    form.callRecordingEnabled ? 'translate-x-6' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+            {form.callRecordingEnabled && (
+              <div className="mt-3 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+                <p className="text-xs text-red-400">
+                  ⚠️ Call recordings are stored by Twilio. Ensure compliance with local recording consent laws.
+                  AI analysis will extract sentiment, topics, and action items from each call.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Provider selection & Voice settings */}
       {(form.voiceEnabled || form.callsEnabled) && (

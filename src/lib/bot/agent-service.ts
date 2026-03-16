@@ -4,6 +4,8 @@ import { dayjs } from './date-helpers';
 import * as aiProvider from './ai-provider';
 import { ConversationService } from './conversation-service';
 import { toolDefinitions, toolHandlers } from './tools';
+import { buildSystemPrompt, buildMinimalPrompt } from './prompts/system-prompt-builder';
+import { scratchpad } from './reasoning-scratchpad';
 import type { AIMessage, AgentContext, IncomingMessage } from './types';
 
 const MAX_TOOL_ROUNDS = 5;
@@ -106,6 +108,12 @@ export class AgentService {
     conversationId: string
   ): Promise<string> {
     let round = 0;
+    const sessionId = conversationId;
+
+    // Start or resume reasoning chain
+    if (!scratchpad.getChain(sessionId)) {
+      scratchpad.startChain(sessionId, 'Process user request');
+    }
 
     while (round < MAX_TOOL_ROUNDS) {
       round++;
@@ -136,6 +144,10 @@ export class AgentService {
 
       // If no tool calls, return the final text response
       if (result.finishReason !== 'tool_calls' || !assistantMessage.tool_calls?.length) {
+        // Record conclusion in scratchpad
+        if (assistantMessage.content) {
+          scratchpad.conclude(sessionId, assistantMessage.content.slice(0, 200));
+        }
         return assistantMessage.content;
       }
 
@@ -168,8 +180,21 @@ export class AgentService {
           args = {};
         }
 
+        // Record action in scratchpad (skip for 'think' tool to avoid recursion)
+        if (toolCall.function.name !== 'think') {
+          scratchpad.act(sessionId, toolCall.function.name, `Called with: ${JSON.stringify(args).slice(0, 100)}`);
+        }
+
         logger.info({ tool: toolCall.function.name, args }, 'Executing tool');
         const toolResult = await handler(args, context);
+
+        // Record result in scratchpad (skip for 'think' tool)
+        if (toolCall.function.name !== 'think') {
+          const resultSummary = toolResult.success
+            ? `Success: ${JSON.stringify(toolResult.data || {}).slice(0, 100)}`
+            : `Error: ${toolResult.error?.slice(0, 100)}`;
+          scratchpad.recordResult(sessionId, toolCall.function.name, resultSummary);
+        }
 
         const toolMessage: AIMessage = {
           role: 'tool',
@@ -227,6 +252,21 @@ YOUR CAPABILITIES (use the provided tools):
 4. Reschedule appointments
 5. List the client's upcoming appointments${bs.serviceTypes.length > 0 ? '\n6. List available services/appointment types' : ''}
 
+CONCIERGE SERVICES (for external bookings):
+- Search for nearby businesses (spas, restaurants, etc.) using search_places
+- Get business details (hours, phone, reviews) using get_place_details
+- Call external businesses to make reservations on the client's behalf using book_external
+IMPORTANT: When booking external services, ALWAYS ask for the client's location/city first to avoid booking in the wrong area.
+
+WEB SEARCH:
+- Use web_search to look up facts, information, or anything you don't know
+- Good for: current events, business info, reviews, general knowledge
+
+REASONING & DISCOVERY:
+- Use discover_tools to search for capabilities when unsure how to handle a request
+- Use think to record your reasoning for complex multi-step tasks
+- Use lookup_skill to get detailed guidance from knowledge skills
+
 IMPORTANT RULES:
 - Keep responses SHORT and CONCISE — aim for 2-3 sentences maximum (WhatsApp style)
 - Be conversational but brief — no unnecessary greetings or filler text
@@ -259,6 +299,20 @@ YOUR CAPABILITIES:
 3. Cancel appointments
 4. Reschedule appointments
 5. List upcoming appointments
+
+CONCIERGE SERVICES (for external bookings):
+- Search for nearby businesses (spas, restaurants, etc.)
+- Get business details (hours, phone, reviews)
+- Call external businesses to make reservations
+IMPORTANT: Always ask for the client's location/city before searching for external businesses.
+
+WEB SEARCH:
+- Use web_search to look up facts, information, or anything you don't know
+
+REASONING & DISCOVERY:
+- Use discover_tools to search for capabilities when unsure how to handle a request
+- Use think to record your reasoning for complex multi-step tasks  
+- Use lookup_skill to get detailed guidance from knowledge skills
 
 GUIDELINES:
 - Keep responses SHORT and CONCISE — aim for 2-3 sentences maximum (WhatsApp style)

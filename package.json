@@ -166,7 +166,8 @@
       "provider": "github",
       "owner": "JuanPablo876",
       "repo": "WhatsappAssistantBot",
-      "releaseType": "release"
+      "releaseType": "release",
+      "private": true
     }
   },
   "engines": {

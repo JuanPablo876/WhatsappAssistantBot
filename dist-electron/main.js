@@ -38,6 +38,20 @@ const electron_updater_1 = require("electron-updater");
 const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
+// Simple semver comparison: returns 1 if a > b, -1 if a < b, 0 if equal
+function compareVersions(a, b) {
+    const partsA = a.replace(/^v/, '').split('.').map(Number);
+    const partsB = b.replace(/^v/, '').split('.').map(Number);
+    for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
+        const numA = partsA[i] || 0;
+        const numB = partsB[i] || 0;
+        if (numA > numB)
+            return 1;
+        if (numA < numB)
+            return -1;
+    }
+    return 0;
+}
 let mainWindow = null;
 let nextServer = null;
 let serverPid = null;
@@ -91,7 +105,7 @@ function parseEnvFile(envPath) {
             }
             vars[key] = value;
         }
-        writeLog(`Loaded ${Object.keys(vars).length} variables from .env`);
+        writeLog(`Loaded ${Object.keys(vars).length} variables from .env: ${Object.keys(vars).join(', ')}`);
     }
     catch (err) {
         writeLog(`Failed to parse .env: ${err.message}`);
@@ -240,20 +254,49 @@ function createWindow() {
                             return;
                         }
                         writeLog('Manual update check requested');
+                        // Show "checking" dialog
+                        const currentVersion = electron_1.app.getVersion();
                         electron_updater_1.autoUpdater.checkForUpdates().then((result) => {
                             if (!result || !result.updateInfo) {
                                 electron_1.dialog.showMessageBox(mainWindow, {
                                     type: 'info',
                                     title: 'No Updates',
                                     message: 'You are running the latest version.',
+                                    detail: `Current version: ${currentVersion}`,
+                                });
+                                return;
+                            }
+                            const availableVersion = result.updateInfo.version;
+                            // Compare versions - if available version is same or older, no update
+                            if (availableVersion === currentVersion || compareVersions(availableVersion, currentVersion) <= 0) {
+                                electron_1.dialog.showMessageBox(mainWindow, {
+                                    type: 'info',
+                                    title: 'No Updates',
+                                    message: 'You are running the latest version.',
+                                    detail: `Current version: ${currentVersion}`,
                                 });
                             }
+                            // If update IS available, the 'update-available' event handler will show the dialog
                         }).catch((err) => {
-                            electron_1.dialog.showMessageBox(mainWindow, {
-                                type: 'error',
-                                title: 'Update Check Failed',
-                                message: `Could not check for updates: ${err.message}`,
-                            });
+                            // Handle common cases gracefully
+                            const errorMsg = err.message || '';
+                            if (errorMsg.includes('404') || errorMsg.includes('Not Found') ||
+                                errorMsg.includes('No published versions') || errorMsg.includes('no releases')) {
+                                electron_1.dialog.showMessageBox(mainWindow, {
+                                    type: 'info',
+                                    title: 'No Updates Available',
+                                    message: 'You are running the latest version.',
+                                    detail: `Current version: ${currentVersion}`,
+                                });
+                            }
+                            else {
+                                electron_1.dialog.showMessageBox(mainWindow, {
+                                    type: 'error',
+                                    title: 'Update Check Failed',
+                                    message: 'Could not check for updates.',
+                                    detail: errorMsg,
+                                });
+                            }
                         });
                     } },
                 { type: 'separator' },
@@ -414,6 +457,8 @@ function startNextServer() {
     // Load .env file from standalone directory
     const envFilePath = path.join(standaloneDir, '.env');
     const envVars = parseEnvFile(envFilePath);
+    // Debug: Confirm BRAVE key is loaded
+    writeLog(`BRAVE_SEARCH_API_KEY loaded: ${!!envVars.BRAVE_SEARCH_API_KEY}, length: ${envVars.BRAVE_SEARCH_API_KEY?.length || 0}`);
     nextServer = (0, child_process_1.spawn)(nodePath, [serverScript], {
         cwd: standaloneDir,
         env: {

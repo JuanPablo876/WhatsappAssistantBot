@@ -47,37 +47,36 @@ export async function POST(req: NextRequest) {
       twilioCost,
     } = body;
 
-    if (!phoneNumber || !twilioSid || !countryCode) {
+    if (!phoneNumber || !countryCode) {
       return NextResponse.json({ 
         success: false, 
-        error: 'Phone number, Twilio SID, and country code are required' 
+        error: 'Phone number and country code are required' 
       }, { status: 400 });
     }
 
-    // Normalize phone number (ensure + prefix)
-    const normalizedNumber = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
+    // Normalize phone number (ensure + prefix, remove spaces/dashes)
+    const normalizedNumber = (phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`)
+      .replace(/[\s\-\(\)]/g, '');
+
+    // Auto-generate twilioSid if not provided
+    const finalTwilioSid = twilioSid || `PN_${Date.now()}_${normalizedNumber.slice(-4)}`;
 
     // Check if number already exists
     const existing = await prisma.platformPhoneNumber.findFirst({
-      where: {
-        OR: [
-          { phoneNumber: normalizedNumber },
-          { twilioSid },
-        ],
-      },
+      where: { phoneNumber: normalizedNumber },
     });
 
     if (existing) {
       return NextResponse.json({ 
         success: false, 
-        error: 'Phone number or Twilio SID already exists' 
+        error: 'Phone number already exists' 
       }, { status: 400 });
     }
 
     const number = await prisma.platformPhoneNumber.create({
       data: {
         phoneNumber: normalizedNumber,
-        twilioSid,
+        twilioSid: finalTwilioSid,
         countryCode,
         areaCode: areaCode || null,
         friendlyName: friendlyName || null,
@@ -89,7 +88,7 @@ export async function POST(req: NextRequest) {
 
     logger.info({ 
       phoneNumber: normalizedNumber,
-      twilioSid,
+      twilioSid: finalTwilioSid,
       adminId: authResult.user.id,
     }, 'Platform phone number added');
 

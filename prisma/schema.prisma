@@ -350,6 +350,10 @@ model VoiceConfig {
   callGreeting     String? // Custom greeting for inbound calls
   callSystemPrompt String? // Custom system prompt for call AI
   callLanguage     String  @default("en-US") // BCP-47 language code
+  callTtsProvider  String  @default("twilio") // "twilio" (Polly), "elevenlabs", or "openai"
+  callVoiceId      String? // Voice ID for ElevenLabs calls (uses voiceId if not set)
+  callPollyVoice   String  @default("Polly.Joanna-Neural") // Neural Polly voice for Twilio TTS
+  callRecordingEnabled Boolean @default(false) // Enable call recording
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -375,6 +379,7 @@ model CallLog {
   transcript  String? // JSON conversation transcript
   recordingUrl String?
   recordingSid String?
+  analysis    String? // JSON: AI analysis with sentiment, summary, action items
   
   startedAt DateTime
   endedAt   DateTime?

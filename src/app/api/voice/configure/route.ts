@@ -22,6 +22,11 @@ export async function POST(request: Request) {
         openaiVoice: body.openaiVoice || 'nova',
         openaiModel: body.openaiModel || 'tts-1',
         openaiSpeed: body.openaiSpeed ?? 1.0,
+        // Phone call TTS provider
+        callTtsProvider: body.callTtsProvider || 'twilio',
+        // Twilio/Polly Neural voice settings
+        callPollyVoice: body.callPollyVoice || 'Polly.Joanna-Neural',
+        callRecordingEnabled: body.callRecordingEnabled ?? false,
       },
       create: {
         tenantId: tenant.id,
@@ -36,6 +41,11 @@ export async function POST(request: Request) {
         openaiVoice: body.openaiVoice || 'nova',
         openaiModel: body.openaiModel || 'tts-1',
         openaiSpeed: body.openaiSpeed ?? 1.0,
+        // Phone call TTS provider
+        callTtsProvider: body.callTtsProvider || 'twilio',
+        // Twilio/Polly Neural voice settings
+        callPollyVoice: body.callPollyVoice || 'Polly.Joanna-Neural',
+        callRecordingEnabled: body.callRecordingEnabled ?? false,
       },
     });
 
