@@ -11,17 +11,39 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     const data: Record<string, unknown> = {
-      channel: body.channel,
+      channel: body.channel || 'CLOUD_API',
       isActive: true,
     };
 
-    if (body.channel === 'CLOUD_API') {
-      data.phoneNumberId = body.phoneNumberId;
-      data.businessId = body.businessId;
+    // Handle setup type
+    if (body.setupType) {
+      data.setupType = body.setupType;
+    }
+
+    // BYOP Twilio configuration
+    if (body.setupType === 'BYOP_TWILIO') {
+      data.twilioAccountSid = body.twilioAccountSid;
+      data.twilioPhoneNumber = body.twilioPhoneNumber;
+      // Only update token if a new one was provided (not masked)
+      if (body.twilioAuthToken && !body.twilioAuthToken.includes('•')) {
+        data.twilioAuthToken = body.twilioAuthToken;
+      }
+    }
+
+    // BYOP Meta / Cloud API configuration  
+    if (body.setupType === 'BYOP_META' || body.channel === 'CLOUD_API') {
+      if (body.phoneNumberId) data.phoneNumberId = body.phoneNumberId;
+      if (body.businessId) data.businessId = body.businessId;
       // Only update token if a new one was provided (not masked)
       if (body.accessToken && !body.accessToken.includes('•')) {
         data.accessToken = body.accessToken;
       }
+    }
+
+    // Baileys configuration
+    if (body.channel === 'BAILEYS' || body.setupType === 'BAILEYS') {
+      data.channel = 'BAILEYS';
+      data.setupType = 'BAILEYS';
     }
 
     await prisma.whatsappConfig.upsert({
@@ -34,7 +56,7 @@ export async function POST(request: Request) {
     });
 
     // Start Baileys connection if channel is BAILEYS
-    if (body.channel === 'BAILEYS') {
+    if (body.channel === 'BAILEYS' || body.setupType === 'BAILEYS') {
       const freshStart = Boolean(body.freshStart);
 
       // If phone number provided, use pairing code instead of QR

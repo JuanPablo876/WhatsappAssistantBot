@@ -163,15 +163,23 @@ model WhatsappConfig {
   id       String @id @default(cuid())
   tenantId String @unique
   
+  // Phone setup type (how the user chose to get their number)
+  setupType PhoneSetupType @default(BAILEYS)
+  
   // Channel type
   channel  WhatsappChannel @default(CLOUD_API)
   
-  // Cloud API settings
+  // Cloud API settings (for BYOP users who set up their own Meta Business)
   phoneNumberId   String?
   accessToken     String?
   businessId      String?
   verifyToken     String?
   webhookSecret   String?
+  
+  // Twilio BYOP settings (user's own Twilio account)
+  twilioAccountSid  String?
+  twilioAuthToken   String?
+  twilioPhoneNumber String?
   
   // Baileys settings (for dev/small-scale)
   baileysSessionData String? // Serialized auth state
@@ -187,9 +195,59 @@ model WhatsappConfig {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
+// How user chose to set up their phone number
+enum PhoneSetupType {
+  RENT_NUMBER   // Rent from us (we buy from Twilio, takes a few days)
+  BAILEYS       // Free, use WhatsApp Web via QR code
+  BYOP_TWILIO   // Bring Your Own Phone via Twilio
+  BYOP_META     // Bring Your Own Phone via Meta Business (Cloud API)
+}
+
 enum WhatsappChannel {
   CLOUD_API
   BAILEYS
+}
+
+// ═══════════════════════════════════════════════════════════
+// PHONE NUMBER RENTAL REQUESTS (Admin notification system)
+// ═══════════════════════════════════════════════════════════
+
+model PhoneRentalRequest {
+  id       String @id @default(cuid())
+  tenantId String
+  
+  // Request details
+  countryCode     String            // ISO country code (e.g., "MX", "US")
+  preferredArea   String?           // Preferred area code (e.g., "33" for Guadalajara)
+  purpose         String?           // Brief description of use case
+  
+  // Status tracking
+  status          RentalRequestStatus @default(PENDING)
+  adminNotes      String?           // Notes from admin during processing
+  
+  // Assigned number (once fulfilled)
+  assignedNumber  String?           // The Twilio number purchased
+  twilioNumberSid String?           // Twilio Phone Number SID
+  monthlyPrice    Float?            // Monthly cost in USD
+  
+  // Timestamps
+  requestedAt     DateTime          @default(now())
+  processedAt     DateTime?         // When admin started processing
+  fulfilledAt     DateTime?         // When number was assigned
+  
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  @@index([tenantId])
+  @@index([status])
+}
+
+enum RentalRequestStatus {
+  PENDING       // Waiting for admin to process
+  PROCESSING    // Admin is purchasing the number
+  FULFILLED     // Number assigned and active
+  REJECTED      // Request was rejected (with reason in adminNotes)
+  CANCELLED     // User cancelled the request
 }
 
 // ═══════════════════════════════════════════════════════════
