@@ -15,7 +15,7 @@ export async function PATCH(
 
     const { id } = await params;
     const body = await req.json();
-    const { status, assignedNumber, adminNotes } = body;
+    const { status, assignedNumber, twilioSid, adminNotes, monthlyPrice } = body;
 
     // Find the request
     const request = await prisma.phoneRentalRequest.findUnique({
@@ -43,22 +43,54 @@ export async function PATCH(
             error: 'Assigned number is required for fulfillment' 
           }, { status: 400 });
         }
+        
         updateData.fulfilledAt = new Date();
         updateData.assignedNumber = assignedNumber;
+        if (monthlyPrice) updateData.monthlyPrice = monthlyPrice;
+        if (twilioSid) updateData.twilioNumberSid = twilioSid;
 
-        // Also update the tenant's WhatsApp config with the assigned number
+        // Create or update the PlatformPhoneNumber record
+        // This tracks OUR numbers (purchased with our Twilio account)
+        const platformNumber = await prisma.platformPhoneNumber.upsert({
+          where: { phoneNumber: assignedNumber },
+          create: {
+            phoneNumber: assignedNumber,
+            twilioSid: twilioSid || `PN_${Date.now()}`, // Use provided SID or generate placeholder
+            countryCode: request.countryCode,
+            areaCode: request.preferredArea || undefined,
+            friendlyName: `Rented to tenant ${request.tenantId}`,
+            tenantId: request.tenantId,
+            assignedAt: new Date(),
+            monthlyPrice: monthlyPrice || 0,
+            status: 'ASSIGNED',
+          },
+          update: {
+            tenantId: request.tenantId,
+            assignedAt: new Date(),
+            status: 'ASSIGNED',
+            friendlyName: `Rented to tenant ${request.tenantId}`,
+            monthlyPrice: monthlyPrice || 0,
+          },
+        });
+
+        // Update the tenant's WhatsApp config to link to this platform number
+        // Note: NO client credentials needed - we use OUR Twilio account
         await prisma.whatsappConfig.upsert({
           where: { tenantId: request.tenantId },
           create: {
             tenantId: request.tenantId,
             setupType: 'RENT_NUMBER',
             channel: 'CLOUD_API',
-            twilioPhoneNumber: assignedNumber,
+            platformPhoneNumberId: platformNumber.id,
             isActive: true,
           },
           update: {
             setupType: 'RENT_NUMBER',
-            twilioPhoneNumber: assignedNumber,
+            platformPhoneNumberId: platformNumber.id,
+            // Clear any BYOP credentials that might have been there
+            twilioAccountSid: null,
+            twilioAuthToken: null,
+            twilioPhoneNumber: null,
             isActive: true,
           },
         });

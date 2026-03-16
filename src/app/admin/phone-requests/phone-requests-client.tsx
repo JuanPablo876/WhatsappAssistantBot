@@ -45,6 +45,8 @@ const COUNTRY_FLAGS: Record<string, string> = {
 export function PhoneRequestsClient({ requests }: Props) {
   const [selectedRequest, setSelectedRequest] = useState<PhoneRequest | null>(null);
   const [assignedNumber, setAssignedNumber] = useState('');
+  const [twilioSid, setTwilioSid] = useState('');
+  const [monthlyPrice, setMonthlyPrice] = useState('');
   const [adminNotes, setAdminNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<RequestStatus | 'ALL'>('ALL');
@@ -64,6 +66,8 @@ export function PhoneRequestsClient({ requests }: Props) {
         body: JSON.stringify({ 
           status, 
           assignedNumber: number || null,
+          twilioSid: twilioSid || null,
+          monthlyPrice: monthlyPrice ? parseFloat(monthlyPrice) : null,
           adminNotes: adminNotes || null,
         }),
       });
@@ -153,6 +157,8 @@ export function PhoneRequestsClient({ requests }: Props) {
                     onClick={() => {
                       setSelectedRequest(request);
                       setAssignedNumber(request.assignedNumber || '');
+                      setTwilioSid('');
+                      setMonthlyPrice('');
                       setAdminNotes(request.adminNotes || '');
                     }}
                     className="text-sm text-[var(--accent)] hover:underline"
@@ -214,15 +220,61 @@ export function PhoneRequestsClient({ requests }: Props) {
                 </div>
               )}
 
+              {/* Instructions for admin */}
+              {['PENDING', 'PROCESSING'].includes(selectedRequest.status) && (
+                <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm">
+                  <strong className="text-blue-800">To fulfill this request:</strong>
+                  <ol className="mt-2 ml-4 list-decimal text-blue-700 space-y-1">
+                    <li>Go to <a href="https://console.twilio.com/us1/develop/phone-numbers/manage/search" target="_blank" rel="noopener noreferrer" className="underline">Twilio Console</a></li>
+                    <li>Search for a number in {COUNTRY_FLAGS[selectedRequest.countryCode]} {selectedRequest.countryCode}{selectedRequest.preferredArea ? ` (area ${selectedRequest.preferredArea})` : ''}</li>
+                    <li>Purchase the number</li>
+                    <li>Copy the phone number and SID below</li>
+                  </ol>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium mb-1.5">Assigned Phone Number</label>
+                <label className="block text-sm font-medium mb-1.5">
+                  Phone Number <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="tel"
                   value={assignedNumber}
                   onChange={(e) => setAssignedNumber(e.target.value)}
                   placeholder="+523312345678"
-                  className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none"
+                  className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none font-mono"
                 />
+                <p className="text-xs text-[var(--muted)] mt-1">E.164 format with + prefix</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">
+                    Twilio Phone Number SID
+                  </label>
+                  <input
+                    type="text"
+                    value={twilioSid}
+                    onChange={(e) => setTwilioSid(e.target.value)}
+                    placeholder="PN..."
+                    className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none font-mono text-sm"
+                  />
+                  <p className="text-xs text-[var(--muted)] mt-1">From Twilio Console</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">
+                    Monthly Price (USD)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={monthlyPrice}
+                    onChange={(e) => setMonthlyPrice(e.target.value)}
+                    placeholder="1.15"
+                    className="w-full px-4 py-2.5 rounded-lg bg-[var(--background)] border border-[var(--border)] focus:border-[var(--primary)] focus:outline-none"
+                  />
+                  <p className="text-xs text-[var(--muted)] mt-1">What Twilio charges</p>
+                </div>
               </div>
 
               <div>

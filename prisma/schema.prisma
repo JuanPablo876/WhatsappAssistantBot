@@ -158,6 +158,23 @@ model BusinessProfile {
 // ═══════════════════════════════════════════════════════════
 // WHATSAPP CONFIGURATION (per tenant)
 // ═══════════════════════════════════════════════════════════
+// 
+// Three modes for phone/WhatsApp integration:
+// 
+// 1. RENT_NUMBER - We buy a number from Twilio, assign to tenant
+//    - Uses OUR Twilio credentials from .env (they don't need any)
+//    - platformPhoneNumberId links to PlatformPhoneNumber
+//    - Webhooks route based on phone number lookup
+// 
+// 2. BAILEYS - Free WhatsApp Web connection
+//    - No external credentials needed
+//    - Session stored in baileysSessionData
+// 
+// 3. BYOP_TWILIO / BYOP_META - Bring Your Own Phone
+//    - Client provides THEIR credentials (stored ENCRYPTED)
+//    - We use their credentials when handling their webhooks
+// 
+// ═══════════════════════════════════════════════════════════
 
 model WhatsappConfig {
   id       String @id @default(cuid())
@@ -169,19 +186,26 @@ model WhatsappConfig {
   // Channel type
   channel  WhatsappChannel @default(CLOUD_API)
   
-  // Cloud API settings (for BYOP users who set up their own Meta Business)
-  phoneNumberId   String?
-  accessToken     String?
-  businessId      String?
-  verifyToken     String?
-  webhookSecret   String?
+  // ─── For RENT_NUMBER setup ───────────────────────────────
+  // Links to the PlatformPhoneNumber we assigned to this tenant
+  // No credentials needed - we use OUR Twilio account
+  platformPhoneNumberId String? // FK to PlatformPhoneNumber.id
   
-  // Twilio BYOP settings (user's own Twilio account)
-  twilioAccountSid  String?
-  twilioAuthToken   String?
-  twilioPhoneNumber String?
+  // ─── For BYOP_META setup (Cloud API) ─────────────────────
+  // Client's own Meta Business credentials (ENCRYPTED in database)
+  phoneNumberId   String? // Meta Phone Number ID
+  accessToken     String? // Meta Access Token (ENCRYPTED)
+  businessId      String? // Meta Business Account ID  
+  verifyToken     String? // Webhook verify token
+  webhookSecret   String? // Webhook signature secret (ENCRYPTED)
   
-  // Baileys settings (for dev/small-scale)
+  // ─── For BYOP_TWILIO setup ───────────────────────────────
+  // Client's own Twilio credentials (ENCRYPTED in database)
+  twilioAccountSid  String? // Twilio Account SID (not sensitive, but stored for reference)
+  twilioAuthToken   String? // Twilio Auth Token (ENCRYPTED - very sensitive!)
+  twilioPhoneNumber String? // Client's Twilio phone number
+  
+  // ─── For BAILEYS setup ───────────────────────────────────
   baileysSessionData String? // Serialized auth state
   baileysConnected   Boolean @default(false)
   
@@ -248,6 +272,52 @@ enum RentalRequestStatus {
   FULFILLED     // Number assigned and active
   REJECTED      // Request was rejected (with reason in adminNotes)
   CANCELLED     // User cancelled the request
+}
+
+// ═══════════════════════════════════════════════════════════
+// PLATFORM PHONE NUMBERS (Numbers WE own and rent to clients)
+// ═══════════════════════════════════════════════════════════
+
+model PlatformPhoneNumber {
+  id          String @id @default(cuid())
+  
+  // Twilio phone number details (from our account)
+  phoneNumber String @unique // E.164 format (e.g., "+523321011949")
+  twilioSid   String @unique // Twilio Phone Number SID (PN...)
+  
+  // Location info
+  countryCode String // ISO code (e.g., "MX", "US")
+  areaCode    String? // Area code (e.g., "33" for Guadalajara)
+  friendlyName String? // Human-readable name
+  
+  // Assignment
+  tenantId    String? // Null = available, set = assigned to this tenant
+  assignedAt  DateTime?
+  
+  // Capabilities
+  voiceEnabled Boolean @default(true)
+  smsEnabled   Boolean @default(true)
+  
+  // Billing
+  monthlyPrice Float @default(0) // What we charge the client
+  twilioCost   Float @default(0) // What Twilio charges us
+  
+  // Status
+  status PlatformNumberStatus @default(AVAILABLE)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([tenantId])
+  @@index([countryCode])
+  @@index([status])
+}
+
+enum PlatformNumberStatus {
+  AVAILABLE    // Ready to assign
+  ASSIGNED     // Currently assigned to a tenant
+  SUSPENDED    // Temporarily disabled (billing issue, etc.)
+  RELEASING    // Being released back to Twilio
 }
 
 // ═══════════════════════════════════════════════════════════

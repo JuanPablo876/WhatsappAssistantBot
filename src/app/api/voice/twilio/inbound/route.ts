@@ -6,12 +6,18 @@ import {
   validateWebhookSignature,
   isTwilioConfigured,
 } from '@/lib/voice/twilio';
+import { getTenantByPhoneNumber, getPlatformTwilioCredentials } from '@/lib/tenant-lookup';
 
 const TWILIO_WEBHOOK_URL = process.env.TWILIO_WEBHOOK_URL || 'https://iatransmisor.com';
 
 /**
  * POST /api/voice/twilio/inbound
  * Handles incoming phone calls from Twilio
+ * 
+ * Routing logic:
+ * 1. Look up which tenant owns the "To" phone number
+ * 2. For RENT_NUMBER: use our platform Twilio credentials
+ * 3. For BYOP: use the client's credentials (from encrypted storage)
  */
 export async function POST(request: NextRequest) {
   try {
@@ -44,21 +50,28 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Find tenant by phone number
-    const tenant = await prisma.tenant.findFirst({
-      where: {
-        voiceConfig: {
-          callsEnabled: true,
-        },
-      },
+    // Look up which tenant owns this phone number
+    const tenantCredentials = await getTenantByPhoneNumber(To);
+    
+    if (!tenantCredentials) {
+      logger.warn({ to: To }, 'No tenant found for this phone number');
+      return new NextResponse(
+        generateErrorTwiML('This number is not configured to receive calls.'),
+        { headers: { 'Content-Type': 'text/xml' } }
+      );
+    }
+
+    // Get the full tenant info
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantCredentials.tenantId },
       include: {
         voiceConfig: true,
         businessProfile: true,
       },
     });
 
-    if (!tenant) {
-      logger.warn({ to: To }, 'No tenant configured for calls');
+    if (!tenant || !tenant.voiceConfig?.callsEnabled) {
+      logger.warn({ tenantId: tenantCredentials.tenantId }, 'Tenant not found or calls not enabled');
       return new NextResponse(
         generateErrorTwiML('This number is not configured to receive calls.'),
         { headers: { 'Content-Type': 'text/xml' } }

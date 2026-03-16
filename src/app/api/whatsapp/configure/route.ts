@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db';
 import { getAuthenticatedUserWithTenant } from '@/lib/auth-local';
 import { baileysManager } from '@/lib/bot/channels/baileys';
 import { processIncomingMessage } from '@/lib/bot/message-handler';
+import { encrypt } from '@/lib/encryption';
 
 export async function POST(request: Request) {
   try {
@@ -20,23 +21,29 @@ export async function POST(request: Request) {
       data.setupType = body.setupType;
     }
 
-    // BYOP Twilio configuration
+    // BYOP Twilio configuration - encrypt sensitive credentials
     if (body.setupType === 'BYOP_TWILIO') {
-      data.twilioAccountSid = body.twilioAccountSid;
+      data.twilioAccountSid = body.twilioAccountSid; // Not sensitive
       data.twilioPhoneNumber = body.twilioPhoneNumber;
       // Only update token if a new one was provided (not masked)
+      // ENCRYPT the auth token before storing
       if (body.twilioAuthToken && !body.twilioAuthToken.includes('•')) {
-        data.twilioAuthToken = body.twilioAuthToken;
+        data.twilioAuthToken = encrypt(body.twilioAuthToken);
       }
     }
 
-    // BYOP Meta / Cloud API configuration  
+    // BYOP Meta / Cloud API configuration - encrypt sensitive credentials
     if (body.setupType === 'BYOP_META' || body.channel === 'CLOUD_API') {
       if (body.phoneNumberId) data.phoneNumberId = body.phoneNumberId;
       if (body.businessId) data.businessId = body.businessId;
       // Only update token if a new one was provided (not masked)
+      // ENCRYPT the access token before storing
       if (body.accessToken && !body.accessToken.includes('•')) {
-        data.accessToken = body.accessToken;
+        data.accessToken = encrypt(body.accessToken);
+      }
+      // ENCRYPT webhook secret if provided
+      if (body.webhookSecret && !body.webhookSecret.includes('•')) {
+        data.webhookSecret = encrypt(body.webhookSecret);
       }
     }
 
