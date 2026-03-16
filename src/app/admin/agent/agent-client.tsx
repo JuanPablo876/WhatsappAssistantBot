@@ -172,7 +172,7 @@ export default function AdminAgentClient() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-64px)] md:h-screen relative">
+    <div className="flex h-full relative">
       {/* Mobile sidebar toggle */}
       <button
         onClick={() => setShowSidebar(!showSidebar)}

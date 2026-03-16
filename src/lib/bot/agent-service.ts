@@ -25,8 +25,42 @@ export class AgentService {
    * Returns the AI response text (caller is responsible for sending it back).
    */
   async handleMessage(incoming: IncomingMessage): Promise<string> {
-    const { tenantId, from: phone, text } = incoming;
-    logger.info({ tenantId, phone, text }, 'Processing message');
+    return this.processMessage({
+      tenantId: incoming.tenantId,
+      phone: incoming.from,
+      text: incoming.text,
+      channel: 'whatsapp',
+    });
+  }
+
+  /**
+   * Handle a phone call speech input. Same agent, same tools — phone is just a channel.
+   * Returns the AI response text (caller renders it via TTS/TwiML).
+   */
+  async handlePhoneMessage(params: {
+    tenantId: string;
+    callerPhone: string;
+    text: string;
+  }): Promise<string> {
+    return this.processMessage({
+      tenantId: params.tenantId,
+      phone: params.callerPhone,
+      text: params.text,
+      channel: 'phone',
+    });
+  }
+
+  /**
+   * Unified message handler — processes messages from any channel.
+   */
+  private async processMessage(params: {
+    tenantId: string;
+    phone: string;
+    text: string;
+    channel: 'whatsapp' | 'phone';
+  }): Promise<string> {
+    const { tenantId, phone, text, channel } = params;
+    logger.info({ tenantId, phone, text, channel }, 'Processing message');
 
     try {
       // Load tenant's business profile
@@ -83,8 +117,8 @@ export class AgentService {
       // Get conversation history
       const history = await this.conversationService.getHistory(conversationId);
 
-      // Build system prompt with business context
-      const systemPrompt = this.buildSystemPrompt(context);
+      // Build system prompt with business context (channel-aware)
+      const systemPrompt = this.buildSystemPrompt(context, channel);
       const messages: AIMessage[] = [
         { role: 'system', content: systemPrompt },
         ...history,
@@ -94,7 +128,8 @@ export class AgentService {
       const response = await this.runAgentLoop(messages, context, conversationId);
       return response;
     } catch (error) {
-      logger.error({ error, tenantId, phone }, 'Error processing message');
+      logger.error({ error, tenantId, phone, channel }, 'Error processing message');
+      if (channel === 'phone') return '';
       return "I'm sorry, I encountered an error processing your request. Please try again in a moment.";
     }
   }
@@ -215,8 +250,9 @@ export class AgentService {
 
   /**
    * Build the system prompt incorporating the tenant's business profile.
+   * Channel-aware: adjusts output rules for phone vs WhatsApp.
    */
-  private buildSystemPrompt(context: AgentContext): string {
+  private buildSystemPrompt(context: AgentContext, channel: 'whatsapp' | 'phone' = 'whatsapp'): string {
     const bs = context.businessSettings;
     const now = dayjs().tz(bs.timezone);
     const workDayNames = bs.workDays
@@ -268,8 +304,11 @@ REASONING & DISCOVERY:
 - Use lookup_skill to get detailed guidance from knowledge skills
 
 IMPORTANT RULES:
-- Keep responses SHORT and CONCISE — aim for 2-3 sentences maximum (WhatsApp style)
-- Be conversational but brief — no unnecessary greetings or filler text
+${channel === 'phone' ? `- CHANNEL: Phone call. Your response will be SPOKEN ALOUD via text-to-speech.
+- Keep responses VERY brief — 1-2 sentences maximum. The caller is listening, not reading.
+- Use natural spoken language. Do NOT use markdown, bullet points, links, emojis, or any formatting.
+- Do NOT read out long lists — summarize instead (e.g., "I have 5 slots available in the morning and 3 in the afternoon. What time works for you?")` : `- Keep responses SHORT and CONCISE — aim for 2-3 sentences maximum (WhatsApp style)
+- Be conversational but brief — no unnecessary greetings or filler text`}
 - Always confirm details before booking
 - Always check availability before booking — the system automatically handles blocked time-off periods
 - If a date is unavailable due to time off, suggest the next available business day
@@ -315,8 +354,11 @@ REASONING & DISCOVERY:
 - Use lookup_skill to get detailed guidance from knowledge skills
 
 GUIDELINES:
-- Keep responses SHORT and CONCISE — aim for 2-3 sentences maximum (WhatsApp style)
-- Be conversational but brief — no unnecessary greetings or filler
+${channel === 'phone' ? `- CHANNEL: Phone call. Your response will be SPOKEN ALOUD via text-to-speech.
+- Keep responses VERY brief — 1-2 sentences maximum. The caller is listening, not reading.
+- Use natural spoken language. No markdown, bullet points, links, emojis, or formatting.
+- Summarize lists instead of reading items one by one.` : `- Keep responses SHORT and CONCISE — aim for 2-3 sentences maximum (WhatsApp style)
+- Be conversational but brief — no unnecessary greetings or filler`}
 - Always confirm before booking
 - Use the check_availability tool before suggesting times
 - Respond in the same language the client uses`;

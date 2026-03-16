@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { logger } from '@/lib/bot/logger';
-import { generateGatherTwiML } from '@/lib/voice/twilio';
+import { generateGatherTwiML, generatePlayAudioTwiML } from '@/lib/voice/twilio';
+import { ElevenLabsService } from '@/lib/voice/elevenlabs';
+import { storeAudio, generateAudioId } from '@/lib/voice/audio-cache';
 
 const TWILIO_WEBHOOK_URL = process.env.TWILIO_WEBHOOK_URL || 'https://iatransmisor.com';
 
@@ -17,7 +19,7 @@ export async function POST(request: NextRequest) {
       params[key] = value.toString();
     });
 
-    const { CallSid, CallStatus, To } = params;
+    const { CallSid, CallStatus, To, From } = params;
     const tenantId = request.nextUrl.searchParams.get('tenantId');
     const greeting = decodeURIComponent(request.nextUrl.searchParams.get('greeting') || '');
 
@@ -52,7 +54,7 @@ export async function POST(request: NextRequest) {
         tenantId,
         callSid: CallSid,
         direction: 'OUTBOUND',
-        from: process.env.TWILIO_PHONE_NUMBER || '',
+        from: From || process.env.TWILIO_PHONE_NUMBER || '',
         to: To,
         status: CallStatus,
         startedAt: new Date(),
@@ -66,12 +68,46 @@ export async function POST(request: NextRequest) {
     const message = greeting || 
       `Hello, this is an automated call from ${businessName}.`;
 
-    // Return TwiML to speak and gather response
-    const twiml = generateGatherTwiML({
-      message,
-      nextUrl: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenantId}`,
-      language: tenant.voiceConfig?.callLanguage || 'en-US',
-    });
+    const nextUrl = `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenantId}`;
+    const callTtsProvider = tenant.voiceConfig?.callTtsProvider || 'twilio';
+    let twiml: string;
+
+    if (callTtsProvider === 'elevenlabs') {
+      try {
+        const apiKey = tenant.voiceConfig?.apiKey || process.env.ELEVENLABS_API_KEY;
+        if (!apiKey) throw new Error('ElevenLabs API key not configured');
+
+        const elevenlabs = new ElevenLabsService(apiKey);
+        const voiceId = tenant.voiceConfig?.callVoiceId || tenant.voiceConfig?.voiceId || '21m00Tcm4TlvDq8ikWAM';
+
+        const audio = await elevenlabs.textToSpeech(message, {
+          voiceId,
+          stability: tenant.voiceConfig?.stability ?? undefined,
+          similarityBoost: tenant.voiceConfig?.similarityBoost ?? undefined,
+        });
+
+        const audioId = generateAudioId();
+        storeAudio(audioId, audio);
+
+        const audioUrl = `${TWILIO_WEBHOOK_URL}/api/voice/elevenlabs/audio?id=${audioId}`;
+        twiml = generatePlayAudioTwiML({ audioUrl, gatherUrl: nextUrl, language: tenant.voiceConfig?.callLanguage || 'en-US' });
+      } catch (err) {
+        logger.warn({ error: err }, 'ElevenLabs TTS failed for outbound, falling back to Twilio');
+        twiml = generateGatherTwiML({
+          message,
+          nextUrl,
+          voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
+          language: tenant.voiceConfig?.callLanguage || 'en-US',
+        });
+      }
+    } else {
+      twiml = generateGatherTwiML({
+        message,
+        nextUrl,
+        voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
+        language: tenant.voiceConfig?.callLanguage || 'en-US',
+      });
+    }
 
     return new NextResponse(twiml, {
       headers: { 'Content-Type': 'text/xml' },

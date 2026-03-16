@@ -79,13 +79,70 @@ const MIGRATIONS = [
       }
     },
   },
-  // Add more migrations here as the schema evolves
-  // {
-  //   version: 2,
-  //   name: 'add_some_feature',
-  //   check: (db) => { /* return true if already applied */ },
-  //   up: (db) => { /* apply the migration */ },
-  // },
+  {
+    version: 3,
+    name: 'add_voice_config_call_fields',
+    description: 'Add Twilio call TTS provider, Polly voice, recording, greeting, system prompt, language columns to VoiceConfig',
+    check: (db) => {
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='VoiceConfig'").all();
+      if (tables.length === 0) return true;
+      
+      const columns = db.prepare("PRAGMA table_info(VoiceConfig)").all();
+      return columns.some(col => col.name === 'callTtsProvider');
+    },
+    up: (db) => {
+      const columns = db.prepare("PRAGMA table_info(VoiceConfig)").all();
+      const columnNames = columns.map(col => col.name);
+      
+      if (!columnNames.includes('callGreeting')) {
+        db.exec("ALTER TABLE VoiceConfig ADD COLUMN callGreeting TEXT");
+        console.log('  Added callGreeting column');
+      }
+      if (!columnNames.includes('callSystemPrompt')) {
+        db.exec("ALTER TABLE VoiceConfig ADD COLUMN callSystemPrompt TEXT");
+        console.log('  Added callSystemPrompt column');
+      }
+      if (!columnNames.includes('callLanguage')) {
+        db.exec("ALTER TABLE VoiceConfig ADD COLUMN callLanguage TEXT DEFAULT 'en-US'");
+        console.log('  Added callLanguage column');
+      }
+      if (!columnNames.includes('callTtsProvider')) {
+        db.exec("ALTER TABLE VoiceConfig ADD COLUMN callTtsProvider TEXT DEFAULT 'twilio'");
+        console.log('  Added callTtsProvider column');
+      }
+      if (!columnNames.includes('callVoiceId')) {
+        db.exec("ALTER TABLE VoiceConfig ADD COLUMN callVoiceId TEXT");
+        console.log('  Added callVoiceId column');
+      }
+      if (!columnNames.includes('callPollyVoice')) {
+        db.exec("ALTER TABLE VoiceConfig ADD COLUMN callPollyVoice TEXT DEFAULT 'Polly.Joanna-Neural'");
+        console.log('  Added callPollyVoice column');
+      }
+      if (!columnNames.includes('callRecordingEnabled')) {
+        db.exec("ALTER TABLE VoiceConfig ADD COLUMN callRecordingEnabled INTEGER DEFAULT 0");
+        console.log('  Added callRecordingEnabled column');
+      }
+    },
+  },
+  {
+    version: 4,
+    name: 'add_call_log_analysis',
+    description: 'Add analysis column to CallLog for AI call analysis',
+    check: (db) => {
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='CallLog'").all();
+      if (tables.length === 0) return true;
+      
+      const columns = db.prepare("PRAGMA table_info(CallLog)").all();
+      return columns.some(col => col.name === 'analysis');
+    },
+    up: (db) => {
+      const columns = db.prepare("PRAGMA table_info(CallLog)").all();
+      if (!columns.some(col => col.name === 'analysis')) {
+        db.exec("ALTER TABLE CallLog ADD COLUMN analysis TEXT");
+        console.log('  Added analysis column to CallLog');
+      }
+    },
+  },
 ];
 
 /**

@@ -225,7 +225,10 @@ export default function AdminShell({ user, stats, children }: AdminShellProps) {
       </aside>
 
       {/* Main content */}
-      <main className="relative z-10 flex-1 overflow-auto pb-20 md:pb-0">
+      <main className={`relative z-10 flex-1 ${pathname === '/admin/agent' ? 'overflow-hidden' : 'overflow-auto pb-20 md:pb-0'}`}>
+        {pathname === '/admin/agent' ? (
+          children
+        ) : (
         <div className="max-w-7xl mx-auto p-4 md:p-8">
           <AnimatePresence mode="wait">
             <motion.div
@@ -239,6 +242,7 @@ export default function AdminShell({ user, stats, children }: AdminShellProps) {
             </motion.div>
           </AnimatePresence>
         </div>
+        )}
       </main>
 
       {/* Mobile Bottom Navigation */}

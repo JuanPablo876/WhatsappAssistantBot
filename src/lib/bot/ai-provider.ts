@@ -94,6 +94,8 @@ export async function complete(options: AICompletionOptions): Promise<AICompleti
       tools: options.tools?.length ? (options.tools as any) : undefined,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens ?? 1024,
+      // Disable thinking mode for Ollama reasoning models (qwen3, etc.)
+      ...(provider === 'ollama' ? { think: false } as any : {}),
     });
 
     const choice = response.choices[0];
@@ -111,31 +113,60 @@ export async function complete(options: AICompletionOptions): Promise<AICompleti
     
     if (!content && reasoning) {
       logger.warn('Ollama returned empty content with reasoning field - extracting from reasoning');
-      // Try to extract the actual generated content from the reasoning
-      // Look for patterns like "Drafting content:" or "Final output:" or Spanish text blocks
-      const draftPatterns = [
-        /(?:Drafting[^:]*:|Final[^:]*:|Output[^:]*:)\s*([\s\S]{100,})/i,
-        /(?:Eres el asistente|You are the|Soy el asistente)[\s\S]{50,}/i,
+      
+      // Strategy: Find the actual user-facing response, not the thinking process.
+      // Models typically structure reasoning as: analysis -> draft response -> final response
+      // Look for quoted response drafts or the final response section.
+      
+      // 1. Look for explicit response markers
+      const responseMarkers = [
+        /(?:My response|Final response|Here'?s my response|Respuesta|Mi respuesta)[:\s]*["']?([^"'\n][\s\S]*?)(?:\n\n(?:\d+\.|\*|Thinking|Analysis|Note:|Wait|Let me)|$)/i,
+        /(?:I (?:will|would|should) (?:say|respond|reply))[:\s]*["']?([^"'\n][\s\S]*?)(?:\n\n(?:\d+\.|\*|Thinking|Analysis|Note:|Wait|Let me)|$)/i,
       ];
       
-      for (const pattern of draftPatterns) {
+      for (const pattern of responseMarkers) {
         const match = reasoning.match(pattern);
-        if (match) {
-          content = match[1] || match[0];
-          // Clean up common artifacts
-          content = content.replace(/^[\s*-]+/, '').trim();
-          logger.info({ extractedLength: content.length }, 'Extracted content from reasoning field');
+        if (match && match[1] && match[1].trim().length > 20) {
+          content = match[1].replace(/["']$/, '').trim();
+          // Strip markdown artifacts
+          content = content.replace(/\*\*/g, '').replace(/^[\s*-]+/, '').trim();
+          logger.info({ extractedLength: content.length }, 'Extracted response from reasoning markers');
           break;
         }
       }
       
-      // If no pattern matched but reasoning has substantial content, use the last substantial paragraph
-      if (!content && reasoning.length > 500) {
-        const paragraphs = reasoning.split(/\n\n+/).filter(p => p.length > 100);
-        if (paragraphs.length > 0) {
-          content = paragraphs[paragraphs.length - 1].trim();
-          logger.info({ extractedLength: content.length }, 'Extracted last paragraph from reasoning');
+      // 2. Look for quoted text blocks that look like actual responses (not analysis)
+      if (!content) {
+        const quotedBlocks = reasoning.match(/["']([^"']{30,}?)["']/g);
+        if (quotedBlocks) {
+          // Find the longest quoted block that looks like a response (not a user quote)
+          const candidates = quotedBlocks
+            .map(q => q.slice(1, -1))
+            .filter(q => !q.includes('Analyze') && !q.includes('Thinking') && q.length > 30);
+          if (candidates.length > 0) {
+            content = candidates[candidates.length - 1].trim();
+            logger.info({ extractedLength: content.length }, 'Extracted quoted response from reasoning');
+          }
         }
+      }
+      
+      // 3. Last resort: take everything AFTER the last "---" or section break
+      if (!content && reasoning.length > 200) {
+        // Look for a clean response section at the end (no bullet points, no numbering)
+        const sections = reasoning.split(/\n---+\n|\n={3,}\n/);
+        if (sections.length > 1) {
+          const lastSection = sections[sections.length - 1].trim();
+          if (lastSection.length > 20 && !lastSection.startsWith('*') && !lastSection.match(/^\d+\./)) {
+            content = lastSection;
+            logger.info({ extractedLength: content.length }, 'Extracted last section from reasoning');
+          }
+        }
+      }
+      
+      // 4. Final fallback: return a generic response rather than leaking reasoning
+      if (!content) {
+        logger.error({ reasoningLength: reasoning.length }, 'Could not extract clean response from reasoning');
+        content = '';
       }
     }
 

@@ -1,5 +1,6 @@
 import Twilio from 'twilio';
 import { logger } from '../bot/logger';
+import { prisma } from '../db';
 
 const VoiceResponse = Twilio.twiml.VoiceResponse;
 
@@ -35,10 +36,10 @@ function getClient(): Twilio.Twilio {
 }
 
 /**
- * Check if Twilio is configured and ready
+ * Check if Twilio is configured and ready (credentials only)
  */
 export function isTwilioConfigured(): boolean {
-  return !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN && TWILIO_PHONE_NUMBER);
+  return !!(TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN);
 }
 
 /**
@@ -61,9 +62,20 @@ export async function makeOutboundCall(
   }
 ): Promise<{ callSid: string; status: string }> {
   const client = getClient();
-  
-  if (!TWILIO_PHONE_NUMBER) {
-    throw new Error('TWILIO_PHONE_NUMBER not configured');
+
+  // Look up the tenant's assigned platform phone number
+  const platformNumber = await prisma.platformPhoneNumber.findFirst({
+    where: {
+      tenantId: options.tenantId,
+      status: 'ASSIGNED',
+      voiceEnabled: true,
+    },
+  });
+
+  // Fall back to env var if no DB number found
+  const fromNumber = platformNumber?.phoneNumber || TWILIO_PHONE_NUMBER;
+  if (!fromNumber) {
+    throw new Error('No phone number available. Assign a platform number to this tenant or set TWILIO_PHONE_NUMBER in .env');
   }
 
   // Normalize phone number
@@ -74,7 +86,7 @@ export async function makeOutboundCall(
   try {
     const call = await client.calls.create({
       to: toNumber,
-      from: TWILIO_PHONE_NUMBER,
+      from: fromNumber,
       url: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/outbound?tenantId=${options.tenantId}&greeting=${encodeURIComponent(options.greeting || '')}`,
       statusCallback: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/status`,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
@@ -105,6 +117,7 @@ export function generateInboundCallTwiML(options: {
   language?: string;
   recordCall?: boolean;
   recordingStatusCallback?: string;
+  helpPrompt?: string;
 }): string {
   const response = new VoiceResponse();
   const voice = (options.voiceName || DEFAULT_VOICE) as any;
@@ -136,7 +149,8 @@ export function generateInboundCallTwiML(options: {
     language,
   });
 
-  gather.say({ voice, language }, 'How can I help you today?');
+  const helpText = options.helpPrompt || (options.language?.startsWith('es') ? '¿En qué puedo ayudarle hoy?' : 'How can I help you today?');
+  gather.say({ voice, language }, helpText);
 
   // If no input, redirect
   response.redirect(`${TWILIO_WEBHOOK_URL}/api/voice/twilio/inbound?timeout=true`);

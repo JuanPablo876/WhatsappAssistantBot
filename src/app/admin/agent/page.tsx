@@ -1,5 +1,9 @@
 import AdminAgentClient from './agent-client';
 
 export default function AdminAgentPage() {
-  return <AdminAgentClient />;
+  return (
+    <div className="h-screen">
+      <AdminAgentClient />
+    </div>
+  );
 }

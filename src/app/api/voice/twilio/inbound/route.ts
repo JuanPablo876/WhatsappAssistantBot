@@ -3,10 +3,13 @@ import { prisma } from '@/lib/db';
 import { logger } from '@/lib/bot/logger';
 import {
   generateInboundCallTwiML,
+  generatePlayAudioTwiML,
   validateWebhookSignature,
   isTwilioConfigured,
 } from '@/lib/voice/twilio';
-import { getTenantByPhoneNumber, getPlatformTwilioCredentials } from '@/lib/tenant-lookup';
+import { getTenantByPhoneNumber } from '@/lib/tenant-lookup';
+import { ElevenLabsService } from '@/lib/voice/elevenlabs';
+import { storeAudio, generateAudioId } from '@/lib/voice/audio-cache';
 
 const TWILIO_WEBHOOK_URL = process.env.TWILIO_WEBHOOK_URL || 'https://iatransmisor.com';
 
@@ -40,8 +43,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate webhook signature in production
-    if (process.env.NODE_ENV === 'production') {
+    // Validate webhook signature (opt-in via env var, since Electron + tunnel breaks NODE_ENV detection)
+    if (process.env.TWILIO_VALIDATE_SIGNATURES === 'true') {
       const signature = request.headers.get('X-Twilio-Signature') || '';
       const url = `${TWILIO_WEBHOOK_URL}/api/voice/twilio/inbound`;
       if (!validateWebhookSignature(signature, url, params)) {
@@ -112,14 +115,53 @@ export async function POST(request: NextRequest) {
     });
 
     // Return TwiML to greet and gather speech
-    const twiml = generateInboundCallTwiML({
-      greeting,
-      gatherUrl: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenant.id}`,
-      language: tenant.voiceConfig?.callLanguage || 'en-US',
-      voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
-      recordCall: tenant.voiceConfig?.callRecordingEnabled || false,
-      recordingStatusCallback: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/status`,
-    });
+    const gatherUrl = `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenant.id}`;
+    const callTtsProvider = tenant.voiceConfig?.callTtsProvider || 'twilio';
+    let twiml: string;
+
+    if (callTtsProvider === 'elevenlabs') {
+      try {
+        const apiKey = tenant.voiceConfig?.apiKey || process.env.ELEVENLABS_API_KEY;
+        if (!apiKey) throw new Error('ElevenLabs API key not configured');
+
+        const elevenlabs = new ElevenLabsService(apiKey);
+        const voiceId = tenant.voiceConfig?.callVoiceId || tenant.voiceConfig?.voiceId || '21m00Tcm4TlvDq8ikWAM';
+
+        const helpQuestion = (tenant.voiceConfig?.callLanguage || 'en-US').startsWith('es') ? '¿En qué puedo ayudarle hoy?' : 'How can I help you today?';
+        const fullGreeting = greeting + ' ' + helpQuestion;
+        const audio = await elevenlabs.textToSpeech(fullGreeting, {
+          voiceId,
+          stability: tenant.voiceConfig?.stability ?? undefined,
+          similarityBoost: tenant.voiceConfig?.similarityBoost ?? undefined,
+        });
+
+        const audioId = generateAudioId();
+        storeAudio(audioId, audio);
+
+        const audioUrl = `${TWILIO_WEBHOOK_URL}/api/voice/elevenlabs/audio?id=${audioId}`;
+        logger.info({ audioId, ttsProvider: 'elevenlabs' }, 'Using ElevenLabs TTS for inbound greeting');
+        twiml = generatePlayAudioTwiML({ audioUrl, gatherUrl, language: tenant.voiceConfig?.callLanguage || 'en-US' });
+      } catch (err) {
+        logger.warn({ error: err }, 'ElevenLabs TTS failed for inbound, falling back to Twilio');
+        twiml = generateInboundCallTwiML({
+          greeting,
+          gatherUrl,
+          language: tenant.voiceConfig?.callLanguage || 'en-US',
+          voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
+          recordCall: tenant.voiceConfig?.callRecordingEnabled || false,
+          recordingStatusCallback: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/status`,
+        });
+      }
+    } else {
+      twiml = generateInboundCallTwiML({
+        greeting,
+        gatherUrl,
+        language: tenant.voiceConfig?.callLanguage || 'en-US',
+        voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
+        recordCall: tenant.voiceConfig?.callRecordingEnabled || false,
+        recordingStatusCallback: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/status`,
+      });
+    }
 
     return new NextResponse(twiml, {
       headers: { 'Content-Type': 'text/xml' },

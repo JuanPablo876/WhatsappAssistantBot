@@ -9,6 +9,8 @@ const PUBLIC_ROUTES = [
   '/api/auth/google/login/callback',  // Google OAuth login callback
   '/api/auth/google/callback',        // Google Calendar OAuth callback
   '/api/webhooks',
+  '/api/voice/twilio',               // Twilio voice webhooks (outbound, inbound, gather, status)
+  '/api/voice/elevenlabs/audio',     // ElevenLabs audio serving (Twilio fetches generated audio)
 ];
 const ADMIN_ROUTES = ['/admin'];
 
