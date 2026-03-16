@@ -36,7 +36,13 @@ const NAV_ITEMS = [
 ];
 
 // Bottom bar items (mobile) - max 5 for thumb zone
-const MOBILE_NAV_ITEMS = NAV_ITEMS.slice(0, 4);
+const MOBILE_NAV_ITEMS = [
+  NAV_ITEMS[0], // Overview
+  NAV_ITEMS[1], // Chats
+  NAV_ITEMS[2], // Appointments
+  NAV_ITEMS[3], // WhatsApp
+  NAV_ITEMS[4], // Voice
+];
 
 export function DashboardShell({ user, tenant, tenants, businessName, children }: DashboardShellProps) {
   const pathname = usePathname();

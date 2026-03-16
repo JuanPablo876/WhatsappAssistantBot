@@ -761,6 +761,89 @@ export const importOpenClawSkill: AdminToolHandler = async () => {
   };
 };
 
+// ─── Phone Call Tools ────────────────────────────────────
+
+export const adminMakeCall: AdminToolHandler = async (args, context) => {
+  const phoneNumber = String(args.phone_number || '').trim();
+  const greeting = String(args.greeting || '').trim();
+  const tenantId = String(args.tenant_id || '').trim();
+
+  if (!phoneNumber) {
+    return { success: false, error: 'phone_number is required' };
+  }
+  if (!greeting) {
+    return { success: false, error: 'greeting is required — tell the AI what to say when the call connects' };
+  }
+
+  try {
+    // Find a tenant with calls enabled
+    let tenant;
+    if (tenantId) {
+      tenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        include: { voiceConfig: true, businessProfile: true },
+      });
+    } else {
+      // Find first tenant with calls enabled
+      const voiceConfig = await prisma.voiceConfig.findFirst({
+        where: { callsEnabled: true },
+        include: { tenant: { include: { businessProfile: true } } },
+      });
+      if (voiceConfig) {
+        tenant = { ...voiceConfig.tenant, voiceConfig };
+      }
+    }
+
+    if (!tenant?.voiceConfig?.callsEnabled) {
+      return {
+        success: false,
+        error: 'No tenant found with phone calls enabled. Enable calls in Dashboard → Voice settings first.',
+      };
+    }
+
+    // Import Twilio module
+    const { makeOutboundCall, isTwilioConfigured } = await import('@/lib/voice/twilio');
+
+    if (!isTwilioConfigured()) {
+      return {
+        success: false,
+        error: 'Twilio is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER in .env',
+      };
+    }
+
+    const normalizedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber.replace(/\D/g, '')}`;
+
+    logger.info({
+      userId: context.userId,
+      userName: context.userName,
+      phone: normalizedPhone,
+      tenantId: tenant.voiceConfig.tenantId,
+    }, 'Admin initiating outbound call via secret agent');
+
+    const result = await makeOutboundCall(normalizedPhone, {
+      tenantId: tenant.voiceConfig.tenantId,
+      greeting,
+      recordCall: tenant.voiceConfig.callRecordingEnabled ?? false,
+      timeout: 30,
+    });
+
+    return {
+      success: true,
+      data: {
+        callSid: result.callSid,
+        status: result.status,
+        phoneNumber: normalizedPhone,
+        greeting,
+        message: `Call initiated to ${normalizedPhone}. Status: ${result.status}. The recipient will receive the call now.`,
+      },
+    };
+  } catch (error) {
+    logger.error({ error, phoneNumber }, 'Admin make_call failed');
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: `Failed to initiate call: ${errorMessage}` };
+  }
+};
+
 // ─── Handler Map ────────────────────────────────────────
 
 export const adminToolHandlers: Record<string, AdminToolHandler> = {
@@ -775,6 +858,7 @@ export const adminToolHandlers: Record<string, AdminToolHandler> = {
   list_whatsapp_contacts: listWhatsAppContacts,
   send_whatsapp_message: sendWhatsAppMessage,
   get_conversation_history: getConversationHistory,
+  make_call: adminMakeCall,
   search_openclaw_skills: searchOpenClawSkills,
   get_openclaw_skill_details: getOpenClawSkillDetails,
   import_openclaw_skill: importOpenClawSkill,

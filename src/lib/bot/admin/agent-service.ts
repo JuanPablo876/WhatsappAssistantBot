@@ -65,14 +65,14 @@ export class AdminAgentService {
   ): Promise<AdminAgentResponse> {
     logger.info({ userId, sessionId }, 'Admin agent message');
 
+    let currentSessionId: string | undefined;
+    let existingMessages: AdminSessionMessage[] = [];
+
     try {
       // Get or create session
       const session = sessionId
         ? await prisma.adminAgentSession.findUnique({ where: { id: sessionId } })
         : null;
-
-      let currentSessionId: string;
-      let existingMessages: AdminSessionMessage[] = [];
 
       if (session && session.userId === userId) {
         currentSessionId = session.id;
@@ -80,7 +80,7 @@ export class AdminAgentService {
       } else {
         // Create new session
         const newSession = await prisma.adminAgentSession.create({
-          data: { userId, title: message.slice(0, 100) },
+          data: { userId, title: message.slice(0, 100), messages: '[]' },
         });
         currentSessionId = newSession.id;
       }
@@ -132,9 +132,20 @@ export class AdminAgentService {
       };
     } catch (error) {
       logger.error({ error, userId }, 'Admin agent error');
+      // Best-effort: save whatever messages we accumulated before the error
+      if (currentSessionId && existingMessages.length > 0) {
+        try {
+          await prisma.adminAgentSession.update({
+            where: { id: currentSessionId },
+            data: { messages: JSON.stringify(existingMessages) },
+          });
+        } catch (saveErr) {
+          logger.error({ saveErr }, 'Failed to save partial messages after admin agent error');
+        }
+      }
       return {
         response: "I encountered an error processing your request. Please try again.",
-        sessionId: sessionId || '',
+        sessionId: currentSessionId || sessionId || '',
       };
     }
   }

@@ -148,14 +148,25 @@ export async function requireAdmin(): Promise<AuthUser> {
 export async function getAuthenticatedUserWithTenant(tenantId?: string) {
   const user = await getAuthenticatedUser();
   
-  // Get user's tenants
-  const tenants = await prisma.tenant.findMany({
+  // Get user's own tenants first
+  const ownTenants = await prisma.tenant.findMany({
     where: { userId: user.id },
     include: { businessProfile: true },
     orderBy: { createdAt: 'asc' },
   });
+
+  // For admins, also get other tenants they can access
+  let allTenants = ownTenants;
+  if (isAdmin(user)) {
+    const otherTenants = await prisma.tenant.findMany({
+      where: { userId: { not: user.id } },
+      include: { businessProfile: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    allTenants = [...ownTenants, ...otherTenants];
+  }
   
-  // If admin, they can access any tenant
+  // Resolve active tenant
   let activeTenant = null;
   if (tenantId) {
     if (isAdmin(user)) {
@@ -164,18 +175,20 @@ export async function getAuthenticatedUserWithTenant(tenantId?: string) {
         include: { businessProfile: true },
       });
     } else {
-      activeTenant = tenants.find(t => t.id === tenantId) || null;
+      activeTenant = allTenants.find(t => t.id === tenantId) || null;
     }
   }
   
-  // Default to first tenant if none selected
-  if (!activeTenant && tenants.length > 0) {
-    activeTenant = tenants[0];
+  // Default to user's own tenant first, then any available tenant
+  if (!activeTenant && ownTenants.length > 0) {
+    activeTenant = ownTenants[0];
+  } else if (!activeTenant && allTenants.length > 0) {
+    activeTenant = allTenants[0];
   }
   
   return {
     user,
-    tenants,
+    tenants: allTenants,
     activeTenant,
   };
 }

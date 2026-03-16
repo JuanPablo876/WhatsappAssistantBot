@@ -59,6 +59,7 @@ export const ADMIN_TOOL_ALLOWLIST = [
   'list_whatsapp_contacts',
   'send_whatsapp_message',
   'get_conversation_history',
+  'make_call',
   'search_openclaw_skills',
   'get_openclaw_skill_details',
   'import_openclaw_skill',

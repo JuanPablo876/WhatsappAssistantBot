@@ -73,12 +73,12 @@ export const MagneticButton = ({ children, onClick, className }: any) => {
   const springX = useSpring(x, springConfig.gentle);
   const springY = useSpring(y, springConfig.gentle);
   
-  const handleMouseMove = (e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleMouseMove = (e: React.MouseEvent<HTMLSpanElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
     
-    x.set((e.clientX - centerX) * 0.1); // Reduced influence
+    x.set((e.clientX - centerX) * 0.1);
     y.set((e.clientY - centerY) * 0.1);
   };
   
@@ -88,16 +88,16 @@ export const MagneticButton = ({ children, onClick, className }: any) => {
   };
   
   return (
-    <motion.button
+    <motion.span
       style={{ x: springX, y: springY }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onClick={onClick}
       whileHover={{ scale: 1.02 }}
       whileTap={{ scale: 0.95 }}
-      className={`relative ${className || ''}`}
+      className={`relative inline-flex ${className || ''}`}
     >
       {children}
-    </motion.button>
+    </motion.span>
   );
 };

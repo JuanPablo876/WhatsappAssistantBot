@@ -280,6 +280,34 @@ export const adminToolDefinitions: AIToolDefinition[] = [
     },
   },
 
+  // ─── Phone Call Tools ────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'make_call',
+      description:
+        'Make an outbound AI phone call to a phone number. The call uses Twilio with the configured voice (Neural Polly or ElevenLabs). Use list_whatsapp_contacts to find phone numbers. Requires calls to be enabled on the tenant and Twilio credentials configured.',
+      parameters: {
+        type: 'object',
+        properties: {
+          phone_number: {
+            type: 'string',
+            description: 'The phone number to call with country code (e.g., "+5213318888888" or "5213318888888")',
+          },
+          greeting: {
+            type: 'string',
+            description: 'The initial message the AI will say when the call is answered. Should be friendly and explain the purpose.',
+          },
+          tenant_id: {
+            type: 'string',
+            description: 'Optional: specific tenant ID to call from. If not provided, uses the first tenant with calls enabled.',
+          },
+        },
+        required: ['phone_number', 'greeting'],
+      },
+    },
+  },
+
   // ─── Skill Discovery Tools ───────────────────────────
   {
     type: 'function',
