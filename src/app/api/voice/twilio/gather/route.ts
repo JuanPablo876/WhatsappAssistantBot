@@ -3,10 +3,12 @@ import { prisma } from '@/lib/db';
 import { logger } from '@/lib/bot/logger';
 import { generateGatherTwiML, generatePlayAudioTwiML } from '@/lib/voice/twilio';
 import { AgentService } from '@/lib/bot/agent-service';
+import { ConversationService } from '@/lib/bot/conversation-service';
 import { ElevenLabsService } from '@/lib/voice/elevenlabs';
 import { storeAudio, generateAudioId } from '@/lib/voice/audio-cache';
 
 const TWILIO_WEBHOOK_URL = process.env.TWILIO_WEBHOOK_URL || 'https://iatransmisor.com';
+const conversationService = new ConversationService();
 
 // Shared agent instance (same brain for WhatsApp + phone)
 const agent = new AgentService();
@@ -73,6 +75,19 @@ export async function POST(request: NextRequest) {
     // Check for end-call phrases
     const endPhrases = ['goodbye', 'bye', 'hang up', 'end call', 'that\'s all', 'thank you goodbye', 'adiós', 'adios', 'hasta luego', 'eso es todo', 'gracias adiós', 'colgar'];
     if (endPhrases.some(phrase => SpeechResult.toLowerCase().includes(phrase))) {
+      const farewellMsg = isSpanish ? 'Gracias por llamar. ¡Hasta luego!' : 'Thank you for calling. Goodbye!';
+
+      // Save farewell exchange to conversation history so the agent remembers it
+      try {
+        const { conversationId } = await conversationService.getOrCreateConversation(tenantId, From || 'unknown', 'phone');
+        await conversationService.saveMessage(conversationId, 'user', SpeechResult);
+        await conversationService.saveMessage(conversationId, 'assistant', farewellMsg);
+      } catch (err) {
+        logger.error({ err }, 'Failed to save farewell to conversation');
+      }
+
+      // Append farewell to cumulative transcript and finalize call log
+      await appendTranscript(CallSid, SpeechResult, farewellMsg);
       await prisma.callLog.updateMany({
         where: { callSid: CallSid },
         data: { status: 'completed', endedAt: new Date() },
@@ -80,7 +95,7 @@ export async function POST(request: NextRequest) {
 
       return new NextResponse(
         generateGatherTwiML({
-          message: isSpanish ? 'Gracias por llamar. ¡Hasta luego!' : 'Thank you for calling. Goodbye!',
+          message: farewellMsg,
           nextUrl: '',
           language: lang,
           endCall: true,
@@ -102,11 +117,8 @@ export async function POST(request: NextRequest) {
       : "I'm sorry, I couldn't process that. Could you repeat?";
     const responseText = aiResponse || fallbackMsg;
 
-    // Update call log transcript
-    await prisma.callLog.updateMany({
-      where: { callSid: CallSid },
-      data: { transcript: responseText },
-    });
+    // Append turn to cumulative transcript on CallLog
+    await appendTranscript(CallSid, SpeechResult, responseText);
 
     // ── Render response via TTS ────────────────────────────
     const callTtsProvider = tenant.voiceConfig.callTtsProvider || 'twilio';
@@ -165,4 +177,30 @@ function generateErrorTwiML(message: string): string {
     <Say voice="Polly.Joanna">Please try again.</Say>
   </Gather>
 </Response>`;
+}
+
+/**
+ * Append a user/assistant turn to the cumulative JSON transcript on CallLog.
+ * Format: [{ role, content, timestamp }, ...]
+ */
+async function appendTranscript(callSid: string, userText: string, assistantText: string) {
+  try {
+    const callLog = await prisma.callLog.findUnique({ where: { callSid } });
+    let transcript: { role: string; content: string; timestamp: string }[] = [];
+
+    if (callLog?.transcript) {
+      try { transcript = JSON.parse(callLog.transcript); } catch { transcript = []; }
+    }
+
+    const now = new Date().toISOString();
+    transcript.push({ role: 'user', content: userText, timestamp: now });
+    transcript.push({ role: 'assistant', content: assistantText, timestamp: now });
+
+    await prisma.callLog.updateMany({
+      where: { callSid },
+      data: { transcript: JSON.stringify(transcript) },
+    });
+  } catch (err) {
+    logger.error({ err, callSid }, 'Failed to append call transcript');
+  }
 }

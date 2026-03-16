@@ -79,7 +79,8 @@ export class AgentService {
       // Get or create conversation
       const { conversationId, contactName } = await this.conversationService.getOrCreateConversation(
         tenantId,
-        phone
+        phone,
+        channel
       );
 
       // Build agent context

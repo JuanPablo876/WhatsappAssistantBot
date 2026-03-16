@@ -14,7 +14,8 @@ export class ConversationService {
    */
   async getOrCreateConversation(
     tenantId: string,
-    phone: string
+    phone: string,
+    channel: string = 'whatsapp'
   ): Promise<{ conversationId: string; contactName?: string }> {
     // Find or create contact scoped to tenant
     let contact = await prisma.contact.findUnique({
@@ -43,6 +44,7 @@ export class ConversationService {
           tenantId,
           contactId: contact.id,
           status: 'ACTIVE',
+          channel,
         },
       });
       logger.debug({ conversationId: conversation.id, tenantId, phone }, 'New conversation started');
