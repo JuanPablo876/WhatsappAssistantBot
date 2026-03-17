@@ -90,12 +90,14 @@ export async function POST(request: NextRequest) {
 
     // If timeout, ask again
     if (timeout) {
+      const timeoutHints = await buildSpeechHints(tenant.id, businessName);
       return new NextResponse(
         generateInboundCallTwiML({
           greeting: "I didn't catch that. ",
           gatherUrl: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenant.id}`,
           language: tenant.voiceConfig?.callLanguage || 'en-US',
           voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
+          speechHints: timeoutHints,
         }),
         { headers: { 'Content-Type': 'text/xml' } }
       );
@@ -117,6 +119,7 @@ export async function POST(request: NextRequest) {
     // Return TwiML to greet and gather speech
     const gatherUrl = `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenant.id}`;
     const callTtsProvider = tenant.voiceConfig?.callTtsProvider || 'twilio';
+    const speechHints = await buildSpeechHints(tenant.id, businessName);
     let twiml: string;
 
     if (callTtsProvider === 'elevenlabs') {
@@ -140,7 +143,7 @@ export async function POST(request: NextRequest) {
 
         const audioUrl = `${TWILIO_WEBHOOK_URL}/api/voice/elevenlabs/audio?id=${audioId}`;
         logger.info({ audioId, ttsProvider: 'elevenlabs' }, 'Using ElevenLabs TTS for inbound greeting');
-        twiml = generatePlayAudioTwiML({ audioUrl, gatherUrl, language: tenant.voiceConfig?.callLanguage || 'en-US' });
+        twiml = generatePlayAudioTwiML({ audioUrl, gatherUrl, language: tenant.voiceConfig?.callLanguage || 'en-US', speechHints });
       } catch (err) {
         logger.warn({ error: err }, 'ElevenLabs TTS failed for inbound, falling back to Twilio');
         twiml = generateInboundCallTwiML({
@@ -150,6 +153,7 @@ export async function POST(request: NextRequest) {
           voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
           recordCall: tenant.voiceConfig?.callRecordingEnabled || false,
           recordingStatusCallback: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/status`,
+          speechHints,
         });
       }
     } else {
@@ -160,6 +164,7 @@ export async function POST(request: NextRequest) {
         voiceName: tenant.voiceConfig?.callPollyVoice || 'Polly.Joanna-Neural',
         recordCall: tenant.voiceConfig?.callRecordingEnabled || false,
         recordingStatusCallback: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/status`,
+        speechHints,
       });
     }
 
@@ -181,4 +186,24 @@ function generateErrorTwiML(message: string): string {
   <Say voice="Polly.Joanna">${message}</Say>
   <Hangup/>
 </Response>`;
+}
+
+/**
+ * Build speech recognition hints from the tenant's business context.
+ */
+async function buildSpeechHints(tenantId: string, businessName?: string | null): Promise<string[]> {
+  const hints: string[] = [];
+  if (businessName) hints.push(businessName);
+
+  try {
+    const services = await prisma.serviceType.findMany({
+      where: { tenantId, isActive: true },
+      select: { name: true },
+    });
+    for (const s of services) hints.push(s.name);
+  } catch { /* ignore */ }
+
+  hints.push('appointment', 'reservation', 'schedule', 'cancel', 'reschedule', 'available');
+  hints.push('cita', 'reservación', 'cancelar', 'reagendar', 'disponible');
+  return hints;
 }

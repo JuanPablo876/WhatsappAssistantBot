@@ -118,6 +118,7 @@ export function generateInboundCallTwiML(options: {
   recordCall?: boolean;
   recordingStatusCallback?: string;
   helpPrompt?: string;
+  speechHints?: string[];
 }): string {
   const response = new VoiceResponse();
   const voice = (options.voiceName || DEFAULT_VOICE) as any;
@@ -140,14 +141,22 @@ export function generateInboundCallTwiML(options: {
   // Say the greeting with natural voice
   response.say({ voice, language }, options.greeting);
 
-  // Gather speech input
-  const gather = response.gather({
+  // Gather speech input with enhanced recognition
+  const gatherOpts: Record<string, unknown> = {
     input: ['speech'],
     action: options.gatherUrl,
     method: 'POST',
     speechTimeout: 'auto',
+    timeout: 8,
     language,
-  });
+    speechModel: 'experimental_conversations',
+    enhanced: true,
+    profanityFilter: false,
+  };
+  if (options.speechHints?.length) {
+    gatherOpts.hints = options.speechHints.join(', ');
+  }
+  const gather = response.gather(gatherOpts as any);
 
   const helpText = options.helpPrompt || (options.language?.startsWith('es') ? '¿En qué puedo ayudarle hoy?' : 'How can I help you today?');
   gather.say({ voice, language }, helpText);
@@ -167,6 +176,7 @@ export function generateGatherTwiML(options: {
   voiceName?: string;
   language?: string;
   endCall?: boolean;
+  speechHints?: string[];
 }): string {
   const response = new VoiceResponse();
   const voice = (options.voiceName || DEFAULT_VOICE) as any;
@@ -176,13 +186,21 @@ export function generateGatherTwiML(options: {
     response.say({ voice, language }, options.message);
     response.hangup();
   } else {
-    const gather = response.gather({
+    const gatherOpts: Record<string, unknown> = {
       input: ['speech'],
       action: options.nextUrl,
       method: 'POST',
       speechTimeout: 'auto',
+      timeout: 8,
       language,
-    });
+      speechModel: 'experimental_conversations',
+      enhanced: true,
+      profanityFilter: false,
+    };
+    if (options.speechHints?.length) {
+      gatherOpts.hints = options.speechHints.join(', ');
+    }
+    const gather = response.gather(gatherOpts as any);
 
     gather.say({ voice, language }, options.message);
 
@@ -199,17 +217,26 @@ export function generatePlayAudioTwiML(options: {
   audioUrl: string;
   gatherUrl: string;
   language?: string;
+  speechHints?: string[];
 }): string {
   const response = new VoiceResponse();
   const language = (options.language || DEFAULT_LANGUAGE) as any;
 
-  const gather = response.gather({
+  const gatherOpts: Record<string, unknown> = {
     input: ['speech'],
     action: options.gatherUrl,
     method: 'POST',
     speechTimeout: 'auto',
+    timeout: 8,
     language,
-  });
+    speechModel: 'experimental_conversations',
+    enhanced: true,
+    profanityFilter: false,
+  };
+  if (options.speechHints?.length) {
+    gatherOpts.hints = options.speechHints.join(', ');
+  }
+  const gather = response.gather(gatherOpts as any);
 
   gather.play(options.audioUrl);
 

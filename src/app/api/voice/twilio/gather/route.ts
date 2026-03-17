@@ -47,26 +47,46 @@ export async function POST(request: NextRequest) {
     // Get tenant voice config (for TTS settings and language)
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
-      include: { voiceConfig: true },
+      include: { voiceConfig: true, businessProfile: true },
     });
 
     if (!tenant || !tenant.voiceConfig) {
       return new NextResponse(
-        generateErrorTwiML('This service is not configured.'),
+        generateErrorTwiML('This service is not configured.', tenantId),
         { headers: { 'Content-Type': 'text/xml' } }
       );
     }
 
     const lang = tenant.voiceConfig.callLanguage || 'en-US';
     const isSpanish = lang.startsWith('es');
+    const nextUrl = `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenantId}`;
+
+    // Build speech hints from tenant's business context (service names, business name)
+    const speechHints = await buildSpeechHints(tenantId, tenant.businessProfile?.businessName);
 
     // If no speech detected
     if (!SpeechResult) {
       return new NextResponse(
         generateGatherTwiML({
           message: isSpanish ? 'No escuché eso. ¿Puede repetirlo por favor?' : "I didn't catch that. Could you please repeat?",
-          nextUrl: `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenantId}`,
+          nextUrl,
           language: lang,
+          speechHints,
+        }),
+        { headers: { 'Content-Type': 'text/xml' } }
+      );
+    }
+
+    // Low-confidence recognition — ask to repeat instead of misunderstanding
+    const confidence = parseFloat(Confidence || '1');
+    if (confidence < 0.4) {
+      logger.warn({ callSid: CallSid, speech: SpeechResult, confidence }, 'Low-confidence speech — re-prompting');
+      return new NextResponse(
+        generateGatherTwiML({
+          message: isSpanish ? 'Disculpe, no entendí bien. ¿Podría repetirlo?' : "I'm sorry, I didn't quite get that. Could you repeat?",
+          nextUrl,
+          language: lang,
+          speechHints,
         }),
         { headers: { 'Content-Type': 'text/xml' } }
       );
@@ -122,7 +142,6 @@ export async function POST(request: NextRequest) {
 
     // ── Render response via TTS ────────────────────────────
     const callTtsProvider = tenant.voiceConfig.callTtsProvider || 'twilio';
-    const nextUrl = `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenantId}`;
     let twiml: string;
 
     if (callTtsProvider === 'elevenlabs') {
@@ -147,16 +166,17 @@ export async function POST(request: NextRequest) {
           audioUrl,
           gatherUrl: nextUrl,
           language: callLanguage,
+          speechHints,
         });
 
         logger.info({ audioId, ttsProvider: 'elevenlabs' }, 'Using ElevenLabs TTS for call');
       } catch (error) {
         logger.error({ error }, 'ElevenLabs TTS failed, falling back to Twilio');
-        twiml = generateGatherTwiML({ message: responseText, nextUrl, language: callLanguage });
+        twiml = generateGatherTwiML({ message: responseText, nextUrl, language: callLanguage, speechHints });
       }
     } else {
       const voiceName = tenant.voiceConfig.callPollyVoice || 'Polly.Joanna-Neural';
-      twiml = generateGatherTwiML({ message: responseText, nextUrl, language: callLanguage, voiceName });
+      twiml = generateGatherTwiML({ message: responseText, nextUrl, language: callLanguage, voiceName, speechHints });
     }
 
     return new NextResponse(twiml, { headers: { 'Content-Type': 'text/xml' } });
@@ -169,14 +189,44 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function generateErrorTwiML(message: string): string {
+function generateErrorTwiML(message: string, tenantId?: string | null): string {
+  const gatherUrl = tenantId
+    ? `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather?tenantId=${tenantId}`
+    : `${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="Polly.Joanna">${message}</Say>
-  <Gather input="speech" action="${TWILIO_WEBHOOK_URL}/api/voice/twilio/gather" method="POST" speechTimeout="auto">
+  <Gather input="speech" action="${gatherUrl}" method="POST" speechTimeout="auto" speechModel="experimental_conversations" enhanced="true">
     <Say voice="Polly.Joanna">Please try again.</Say>
   </Gather>
 </Response>`;
+}
+
+/**
+ * Build speech recognition hints from the tenant's business context.
+ * Hints improve recognition accuracy for domain-specific vocabulary.
+ */
+async function buildSpeechHints(tenantId: string, businessName?: string | null): Promise<string[]> {
+  const hints: string[] = [];
+
+  if (businessName) hints.push(businessName);
+
+  // Add service type names as hints
+  try {
+    const services = await prisma.serviceType.findMany({
+      where: { tenantId, isActive: true },
+      select: { name: true },
+    });
+    for (const s of services) {
+      hints.push(s.name);
+    }
+  } catch { /* ignore */ }
+
+  // Common appointment/scheduling terms
+  hints.push('appointment', 'reservation', 'schedule', 'cancel', 'reschedule', 'available');
+  hints.push('cita', 'reservación', 'cancelar', 'reagendar', 'disponible');
+
+  return hints;
 }
 
 /**
